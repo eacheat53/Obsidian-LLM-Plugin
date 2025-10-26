@@ -1,9 +1,9 @@
 /**
- * Three-tier error classification for API errors
+ * API 错误的三层分类
  */
 
 /**
- * Base class for all plugin errors
+ * 所有插件错误的基类
  */
 export class PluginError extends Error {
   constructor(message: string) {
@@ -14,38 +14,38 @@ export class PluginError extends Error {
 }
 
 /**
- * Tier 1: Configuration Errors
- * These indicate user configuration issues that prevent the operation from proceeding.
- * Action: Immediate abort with actionable notification
- * Examples: Invalid API key, wrong endpoint, bad model name
- * HTTP Status: 401 Unauthorized, 404 Not Found, 400 Bad Request
+ * 第 1 层：配置错误
+ * 这些错误表示用户配置问题，导致操作无法继续。
+ * 操作：立即中止并显示可操作的通知
+ * 示例：无效的 API 密钥、错误的端点、错误的模型名称
+ * HTTP 状态：401 Unauthorized、404 Not Found、400 Bad Request
  */
 export class ConfigurationError extends PluginError {
-  /** HTTP status code that caused this error */
+  /** 导致此错误的 HTTP 状态代码 */
   readonly status?: number;
 
-  /** Actionable guidance for the user */
+  /** 给用户的可操作指南 */
   readonly guidance: string;
 
   constructor(message: string, status?: number, guidance?: string) {
     super(message);
     this.status = status;
-    this.guidance = guidance || 'Please check your settings and try again.';
+    this.guidance = guidance || '请检查您的设置并重试。';
   }
 }
 
 /**
- * Tier 2: Transient Errors
- * These are temporary issues that may resolve with retry.
- * Action: Auto-retry with exponential backoff (3 attempts: 1s, 2s, 4s)
- * Examples: Network issues, server errors, rate limits
- * HTTP Status: 500 Internal Server Error, 503 Service Unavailable, 504 Gateway Timeout, 429 Too Many Requests
+ * 第 2 层：瞬时错误
+ * 这些是临时问题，可以通过重试解决。
+ * 操作：使用指数退避算法自动重试（3 次尝试：1 秒、2 秒、4 秒）
+ * 示例：网络问题、服务器错误、速率限制
+ * HTTP 状态：500 Internal Server Error、503 Service Unavailable、504 Gateway Timeout、429 Too Many Requests
  */
 export class TransientError extends PluginError {
-  /** HTTP status code that caused this error */
+  /** 导致此错误的 HTTP 状态代码 */
   readonly status?: number;
 
-  /** Number of retry attempts made */
+  /** 已进行的重试次数 */
   readonly attempts: number;
 
   constructor(message: string, status?: number, attempts = 0) {
@@ -56,16 +56,16 @@ export class TransientError extends PluginError {
 }
 
 /**
- * Tier 3: Content Errors
- * These indicate issues with specific content items that can be skipped.
- * Action: Skip problematic item, continue processing queue, report in summary
- * Examples: Note exceeds API context window, unprocessable characters
+ * 第 3 层：内容错误
+ * 这些错误表示特定内容项存在问题，可以跳过。
+ * 操作：跳过有问题的项目，继续处理队列，并在摘要中报告
+ * 示例：笔记超出 API 上下文窗口、无法处理的字符
  */
 export class ContentError extends PluginError {
-  /** Identifier of the problematic item (e.g., note_id, file path) */
+  /** 有问题的项目的标识符（例如，note_id、文件路径） */
   readonly item_id?: string;
 
-  /** Specific reason for the error */
+  /** 错误的具体原因 */
   readonly reason: string;
 
   constructor(message: string, item_id?: string, reason?: string) {
@@ -76,74 +76,74 @@ export class ContentError extends PluginError {
 }
 
 /**
- * Classify an HTTP error response into one of the three tiers
+ * 将 HTTP 错误响应分类为三层之一
  *
- * @param status - HTTP status code
- * @param message - Error message
- * @returns Appropriate error instance
+ * @param status - HTTP 状态代码
+ * @param message - 错误消息
+ * @returns 适当的错误实例
  */
 export function classifyAPIError(status: number, message: string): PluginError {
-  // Tier 1: Configuration Errors
+  // 第 1 层：配置错误
   if (status === 401) {
     return new ConfigurationError(
-      'Invalid API key',
+      '无效的 API 密钥',
       status,
-      'Please check your API key in plugin settings. Make sure it is correct and has not expired.'
+      '请检查插件设置中的 API 密钥。确保它是正确的并且没有过期。'
     );
   }
 
   if (status === 404) {
     return new ConfigurationError(
-      'API endpoint not found',
+      '未找到 API 端点',
       status,
-      'Please check the API URL in plugin settings. The endpoint may be incorrect or the service may be unavailable.'
+      '请检查插件设置中的 API URL。端点可能不正确或服务可能不可用。'
     );
   }
 
   if (status === 400) {
     return new ConfigurationError(
-      'Bad request to API',
+      '对 API 的错误请求',
       status,
-      'Please check your model name and other API configuration settings.'
+      '请检查您的模型名称和其他 API 配置设置。'
     );
   }
 
-  // Tier 2: Transient Errors
+  // 第 2 层：瞬时错误
   if (status === 429) {
     return new TransientError(
-      'Rate limit exceeded',
+      '超出速率限制',
       status
     );
   }
 
   if (status === 500 || status === 503 || status === 504) {
     return new TransientError(
-      `Server error: ${status}`,
+      `服务器错误: ${status}`,
       status
     );
   }
 
   if (status === 0) {
     return new TransientError(
-      'Network error: Unable to reach API',
+      '网络错误：无法访问 API',
       status
     );
   }
 
-  // Default to transient for unknown errors (can be retried)
+  // 对于未知错误，默认为瞬时错误（可以重试）
   return new TransientError(
-    `Unexpected error: ${message}`,
+    `意外错误: ${message}`,
     status
   );
 }
 
 /**
- * Classify a content-related error
+ * 对与内容相关的错误进行分类
  *
- * @param message - Error message
- * @param itemId - Identifier of the problematic item
- * @param reason - Specific reason for the error
- * @returns ContentError instance
+ * @param message - 错误消息
+ * @param itemId - 有问题的项目的标识符
+ * @param reason - 错误的具体原因
+ * @returns ContentError 实例
  */
 export function classifyContentError(
   message: string,
@@ -154,31 +154,31 @@ export function classifyContentError(
 }
 
 /**
- * Check if an error should be retried
+ * 检查是否应重试错误
  *
- * @param error - Error to check
- * @returns True if error is transient and should be retried
+ * @param error - 要检查的错误
+ * @returns 如果错误是瞬时错误并且应该重试，则为 True
  */
 export function shouldRetry(error: Error): boolean {
   return error instanceof TransientError;
 }
 
 /**
- * Check if an error can be skipped (continue processing other items)
+ * 检查是否可以跳过错误（继续处理其他项目）
  *
- * @param error - Error to check
- * @returns True if error is content-related and item can be skipped
+ * @param error - 要检查的错误
+ * @returns 如果错误与内容相关并且可以跳过项目，则为 True
  */
 export function canSkip(error: Error): boolean {
   return error instanceof ContentError;
 }
 
 /**
- * Calculate delay for exponential backoff
- * Delays: 1s, 2s, 4s for attempts 0, 1, 2
+ * 计算指数退避的延迟
+ * 延迟：对于尝试 0、1、2，分别为 1 秒、2 秒、4 秒
  *
- * @param attempt - Current attempt number (0-indexed)
- * @returns Delay in milliseconds
+ * @param attempt - 当前尝试次数（从 0 开始）
+ * @returns 延迟（毫秒）
  */
 export function getRetryDelay(attempt: number): number {
   return Math.pow(2, attempt) * 1000; // 1s, 2s, 4s

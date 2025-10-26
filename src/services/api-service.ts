@@ -1,6 +1,6 @@
 /**
- * API service for external HTTP requests (Jina embeddings and LLM APIs)
- * Uses Obsidian's requestUrl() to avoid CORS issues
+ * 用于外部 HTTP 请求（Jina 嵌入和 LLM API）的 API 服务
+ * 使用 Obsidian 的 requestUrl() 来避免 CORS 问题
  */
 
 import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian';
@@ -22,7 +22,7 @@ import { NoteId } from '../types/index';
 import { classifyAPIError, TransientError, getRetryDelay } from '../utils/error-classifier';
 
 /**
- * Service for making external API calls
+ * 用于进行外部 API 调用的服务
  */
 export class APIService {
   private settings: PluginSettings;
@@ -32,18 +32,18 @@ export class APIService {
   }
 
   /**
-   * Call Jina AI embeddings API
-   * Handles batching, error classification, and retries
+   * 调用 Jina AI 嵌入 API
+   * 处理批处理、错误分类和重试
    *
-   * @param request - Batch embedding request
-   * @returns Embedding response with vectors
+   * @param request - 批量嵌入请求
+   * @returns 带有向量的嵌入响应
    */
   async callJinaAPI(request: JinaBatchEmbeddingRequest): Promise<JinaEmbeddingResponse> {
     if (!this.settings.jina_api_key) {
-      throw new Error('Jina API key not configured. Please set it in plugin settings.');
+      throw new Error('Jina API 密钥未配置。请在插件设置中设置。');
     }
 
-    // Truncate inputs to max_chars limit
+    // 将输入截断到 max_chars 限制
     const truncatedInputs = request.input.map(text =>
       text.length > this.settings.jina_max_chars
         ? text.substring(0, this.settings.jina_max_chars)
@@ -64,25 +64,25 @@ export class APIService {
     };
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[API Service] Calling Jina API with ${request.input.length} texts`);
+      console.log(`[API Service] 正在使用 ${request.input.length} 个文本调用 Jina API`);
     }
 
     const response = await this.makeRequestWithRetry(params);
     const data = JSON.parse(response.text) as JinaEmbeddingResponse;
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[API Service] Jina API returned ${data.data.length} embeddings`);
+      console.log(`[API Service] Jina API 返回了 ${data.data.length} 个嵌入`);
     }
 
     return data;
   }
 
   /**
-   * Call LLM API for batch scoring
-   * Uses provider adapter pattern (Gemini, OpenAI, etc.)
+   * 调用 LLM API 进行批量评分
+   * 使用提供商适配器模式（Gemini、OpenAI 等）
    *
-   * @param request - Batch scoring request
-   * @returns Scoring response with AI scores
+   * @param request - 批量评分请求
+   * @returns 带有 AI 分数的评分响应
    */
   async callLLMAPI(request: ScoringBatchRequest): Promise<ScoringBatchResponse> {
     const adapter = this.getLLMAdapter();
@@ -90,10 +90,10 @@ export class APIService {
   }
 
   /**
-   * Call LLM API for batch tag generation
+   * 调用 LLM API 进行批量标签生成
    *
-   * @param request - Batch tagging request
-   * @returns Tagging response with generated tags
+   * @param request - 批量标记请求
+   * @returns 带有生成标签的标记响应
    */
   async callLLMTaggingAPI(request: TaggingBatchRequest): Promise<TaggingBatchResponse> {
     const adapter = this.getLLMAdapter();
@@ -101,11 +101,11 @@ export class APIService {
   }
 
   /**
-   * Make HTTP request with retry logic for transient errors
+   * 使用针对瞬时错误的重试逻辑发出 HTTP 请求
    *
-   * @param params - Request parameters
-   * @param maxRetries - Maximum retry attempts (default: 3)
-   * @returns Response object
+   * @param params - 请求参数
+   * @param maxRetries - 最大重试次数（默认为 3）
+   * @returns 响应对象
    */
   private async makeRequestWithRetry(
     params: RequestUrlParam,
@@ -117,7 +117,7 @@ export class APIService {
       try {
         const response = await requestUrl(params);
 
-        // Check for HTTP errors
+        // 检查 HTTP 错误
         if (response.status >= 400) {
           throw classifyAPIError(response.status, response.text);
         }
@@ -126,33 +126,33 @@ export class APIService {
       } catch (error) {
         lastError = error as Error;
 
-        // Only retry transient errors
+        // 仅重试瞬时错误
         if (error instanceof TransientError && attempt < maxRetries - 1) {
           const delay = getRetryDelay(attempt);
           if (this.settings.enable_debug_logging) {
-            console.log(`[API Service] Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+            console.log(`[API Service] 在 ${delay}ms 后重试（尝试 ${attempt + 1}/${maxRetries}）`);
           }
           await this.sleep(delay);
           continue;
         }
 
-        // Don't retry configuration or content errors
+        // 不要重试配置或内容错误
         throw error;
       }
     }
 
-    throw lastError || new Error('Request failed');
+    throw lastError || new Error('请求失败');
   }
 
   /**
-   * Sleep for specified milliseconds
+   * 休眠指定的毫秒数
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
-   * Get LLM adapter for configured provider
+   * 获取已配置提供商的 LLM 适配器
    */
   private getLLMAdapter(): LLMAdapter {
     switch (this.settings.ai_provider) {
@@ -161,16 +161,16 @@ export class APIService {
       case 'openai':
         return new OpenAIAdapter(this.settings, this);
       case 'custom':
-        // Custom provider uses OpenAI-compatible format
+        // 自定义提供商使用与 OpenAI 兼容的格式
         return new OpenAIAdapter(this.settings, this);
       default:
-        throw new Error(`Unsupported LLM provider: ${this.settings.ai_provider}`);
+        throw new Error(`不支持的 LLM 提供商: ${this.settings.ai_provider}`);
     }
   }
 
   /**
-   * Make raw HTTP POST request (for adapters to use)
-   * Internal method exposed to adapters
+   * 发出原始 HTTP POST 请求（供适配器使用）
+   * 暴露给适配器的内部方法
    */
   async makePostRequest(url: string, headers: Record<string, string>, body: unknown): Promise<RequestUrlResponse> {
     const params: RequestUrlParam = {
@@ -185,11 +185,11 @@ export class APIService {
 }
 
 // ============================================================================
-// LLM Provider Adapters
+// LLM 提供商适配器
 // ============================================================================
 
 /**
- * Google Gemini adapter
+ * Google Gemini 适配器
  */
 class GeminiAdapter implements LLMAdapter {
   private settings: PluginSettings;
@@ -202,13 +202,13 @@ class GeminiAdapter implements LLMAdapter {
 
   async scoreBatch(request: ScoringBatchRequest): Promise<ScoringBatchResponse> {
     if (!this.settings.ai_api_key) {
-      throw new Error('Gemini API key not configured. Please set it in plugin settings.');
+      throw new Error('Gemini API 密钥未配置。请在插件设置中设置。');
     }
 
-    // Build prompt from note pairs
+    // 从笔记配对构建提示
     const prompt = this.buildScoringPrompt(request);
 
-    // Gemini API endpoint: {base_url}/{model}:generateContent
+    // Gemini API 端点: {base_url}/{model}:generateContent
     const url = `${this.settings.ai_api_url}/${this.settings.ai_model_name}:generateContent?key=${this.settings.ai_api_key}`;
 
     const body = {
@@ -222,12 +222,12 @@ class GeminiAdapter implements LLMAdapter {
         topK: 40,
         topP: 0.95,
         maxOutputTokens: 20000,  
-        responseModalities: ["TEXT"],  // Force text-only output
+        responseModalities: ["TEXT"],  // 强制纯文本输出
       }
     };
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[Gemini Adapter] Scoring ${request.pairs.length} note pairs`);
+      console.log(`[Gemini Adapter] 正在对 ${request.pairs.length} 个笔记配对进行评分`);
     }
 
     const response = await this.apiService.makePostRequest(url, {
@@ -237,28 +237,28 @@ class GeminiAdapter implements LLMAdapter {
     const data = JSON.parse(response.text);
 
     if (this.settings.enable_debug_logging) {
-      console.log('[Gemini Adapter] Full scoring API response:', data);
+      console.log('[Gemini Adapter] 完整的评分 API 响应:', data);
     }
 
-    // Check for API errors
+    // 检查 API 错误
     if (data.error) {
-      console.error('[Gemini Adapter] API error:', data.error);
-      throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
+      console.error('[Gemini Adapter] API 错误:', data.error);
+      throw new Error(`Gemini API 错误: ${data.error.message || JSON.stringify(data.error)}`);
     }
 
-    // Check for truncated response (MAX_TOKENS)
+    // 检查截断的响应 (MAX_TOKENS)
     const finishReason = data.candidates?.[0]?.finishReason;
     if (finishReason === 'MAX_TOKENS') {
-      console.error('[Gemini Adapter] Response truncated due to MAX_TOKENS. Thoughts tokens:', data.usageMetadata?.thoughtsTokenCount);
-      throw new Error('Gemini response was truncated (MAX_TOKENS). The model may be in thinking mode. Try reducing batch size or using a different model.');
+      console.error('[Gemini Adapter] 由于 MAX_TOKENS，响应被截断。思考令牌数:', data.usageMetadata?.thoughtsTokenCount);
+      throw new Error('Gemini 响应被截断 (MAX_TOKENS)。模型可能处于思考模式。请尝试减小批量大小或使用不同的模型。');
     }
 
-    // Parse Gemini response
+    // 解析 Gemini 响应
     const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     if (!responseText) {
-      console.error('[Gemini Adapter] Empty scoring response text. Full data structure:', JSON.stringify(data, null, 2));
-      throw new Error(`Empty response from Gemini. Finish reason: ${finishReason || 'unknown'}`);
+      console.error('[Gemini Adapter] 空的评分响应文本。完整数据结构:', JSON.stringify(data, null, 2));
+      throw new Error(`来自 Gemini 的空响应。完成原因: ${finishReason || 'unknown'}`);
     }
 
     const scores = this.parseScoringResponse(responseText, request.pairs);
@@ -276,7 +276,7 @@ class GeminiAdapter implements LLMAdapter {
 
   async generateTagsBatch(request: TaggingBatchRequest): Promise<TaggingBatchResponse> {
     if (!this.settings.ai_api_key) {
-      throw new Error('Gemini API key not configured. Please set it in plugin settings.');
+      throw new Error('Gemini API 密钥未配置。请在插件设置中设置。');
     }
 
     const prompt = this.buildTaggingPrompt(request);
@@ -294,12 +294,12 @@ class GeminiAdapter implements LLMAdapter {
         topK: 40,
         topP: 0.95,
         maxOutputTokens: 20000,  
-        responseModalities: ["TEXT"],  // Force text-only output
+        responseModalities: ["TEXT"],  // 强制纯文本输出
       }
     };
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[Gemini Adapter] Generating tags for ${request.notes.length} notes`);
+      console.log(`[Gemini Adapter] 正在为 ${request.notes.length} 个笔记生成标签`);
     }
 
     const response = await this.apiService.makePostRequest(url, {
@@ -309,27 +309,27 @@ class GeminiAdapter implements LLMAdapter {
     const data = JSON.parse(response.text);
 
     if (this.settings.enable_debug_logging) {
-      console.log('[Gemini Adapter] Full API response:', data);
+      console.log('[Gemini Adapter] 完整的 API 响应:', data);
     }
 
-    // Check for API errors
+    // 检查 API 错误
     if (data.error) {
-      console.error('[Gemini Adapter] API error:', data.error);
-      throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
+      console.error('[Gemini Adapter] API 错误:', data.error);
+      throw new Error(`Gemini API 错误: ${data.error.message || JSON.stringify(data.error)}`);
     }
 
-    // Check for truncated response (MAX_TOKENS)
+    // 检查截断的响应 (MAX_TOKENS)
     const finishReason = data.candidates?.[0]?.finishReason;
     if (finishReason === 'MAX_TOKENS') {
-      console.error('[Gemini Adapter] Response truncated due to MAX_TOKENS. Thoughts tokens:', data.usageMetadata?.thoughtsTokenCount);
-      throw new Error('Gemini response was truncated (MAX_TOKENS). The model may be in thinking mode. Try reducing batch size or using a different model.');
+      console.error('[Gemini Adapter] 由于 MAX_TOKENS，响应被截断。思考令牌数:', data.usageMetadata?.thoughtsTokenCount);
+      throw new Error('Gemini 响应被截断 (MAX_TOKENS)。模型可能处于思考模式。请尝试减小批量大小或使用不同的模型。');
     }
 
     const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     if (!responseText) {
-      console.error('[Gemini Adapter] Empty tagging response text. Full data structure:', JSON.stringify(data, null, 2));
-      throw new Error(`Empty response from Gemini. Finish reason: ${finishReason || 'unknown'}`);
+      console.error('[Gemini Adapter] 空的标记响应文本。完整数据结构:', JSON.stringify(data, null, 2));
+      throw new Error(`来自 Gemini 的空响应。完成原因: ${finishReason || 'unknown'}`);
     }
 
     const results = this.parseTaggingResponse(responseText, request.notes);
@@ -348,7 +348,7 @@ class GeminiAdapter implements LLMAdapter {
   private buildScoringPrompt(request: ScoringBatchRequest): string {
     const basePrompt = request.prompt || this.settings.custom_scoring_prompt;
 
-    // Build structured JSON data for pairs
+    // 为配对构建结构化 JSON 数据
     const pairsData = request.pairs.map((pair, index) => ({
       pair_id: index + 1,
       note_1: {
@@ -366,19 +366,7 @@ class GeminiAdapter implements LLMAdapter {
 
     const dataJson = JSON.stringify({ pairs: pairsData }, null, 2);
 
-    const prompt = `${basePrompt}
-
-Please score the following note pairs. The data is provided in JSON format for clarity:
-
-\`\`\`json
-${dataJson}
-\`\`\`
-
-Respond with a JSON array that matches the pair_ids. Each element must include pair_id, note_id_1, note_id_2, and score (0-10):
-
-[{"pair_id": 1, "note_id_1": "id1", "note_id_2": "id2", "score": 7}, ...]
-
-IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs.length} elements, one for each pair_id.`;
+    const prompt = `${basePrompt}\n\n请对以下笔记配对进行评分。为清晰起见，数据以 JSON 格式提供:\n\n\`\`\`json\n${dataJson}\n\`\`\`\n\n请使用与 pair_ids 匹配的 JSON 数组进行响应。每个元素必须包含 pair_id、note_id_1、note_id_2 和 score (0-10):\n\n[{"pair_id": 1, "note_id_1": "id1", "note_id_2": "id2", "score": 7}, ...]\n\n重要提示：您的响应必须是有效的 JSON 数组，其中包含 ${request.pairs.length} 个元素，每个 pair_id 一个。`;
 
     return prompt;
   }
@@ -386,20 +374,20 @@ IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs
   private buildTaggingPrompt(request: TaggingBatchRequest): string {
     const basePrompt = request.prompt || this.settings.custom_tagging_prompt;
 
-    let prompt = `${basePrompt}\n\nGenerate ${request.min_tags || 3}-${request.max_tags || 5} relevant tags for each note:\n\n`;
+    let prompt = `${basePrompt}\n\n为每个笔记生成 ${request.min_tags || 3}-${request.max_tags || 5} 个相关标签:\n\n`;
 
     request.notes.forEach((note) => {
-      prompt += `Note ID: ${note.note_id}\n`;
-      prompt += `Title: "${note.title}"\n`;
-      prompt += `Content: ${note.content.substring(0, 1000)}\n`;
+      prompt += `笔记 ID: ${note.note_id}\n`;
+      prompt += `标题: "${note.title}"\n`;
+      prompt += `内容: ${note.content.substring(0, 1000)}\n`;
       if (note.existing_tags.length > 0) {
-        prompt += `Existing tags: ${note.existing_tags.join(', ')}\n`;
+        prompt += `现有标签: ${note.existing_tags.join(', ')}\n`;
       }
       prompt += '\n';
     });
 
-    prompt += '\nRespond with JSON array using the exact Note ID from input:\n';
-    prompt += '[{"note_id": "<exact UUID from input>", "tags": ["tag1", "tag2"]}, ...]';
+    prompt += '\n使用输入中的确切笔记 ID 以 JSON 数组响应:\n';
+    prompt += '[{"note_id": "<输入中的确切 UUID>", "tags": ["tag1", "tag2"]}, ...]';
 
     return prompt;
   }
@@ -407,33 +395,33 @@ IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs
   private parseScoringResponse(responseText: string, pairs: NotePairForScoring[]): ScoreResult[] {
     try {
       if (this.settings.enable_debug_logging) {
-        console.log('[Gemini Adapter] Raw scoring response:', responseText);
+        console.log('[Gemini Adapter] 原始评分响应:', responseText);
       }
 
-      // Try to extract JSON from various formats
+      // 尝试从各种格式中提取 JSON
       let jsonText = '';
 
-      // Method 1: Try to find JSON in markdown code blocks
+      // 方法 1：尝试在 markdown 代码块中查找 JSON
       const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (codeBlockMatch) {
         jsonText = codeBlockMatch[1].trim();
         if (this.settings.enable_debug_logging) {
-          console.log('[Gemini Adapter] Found JSON in code block');
+          console.log('[Gemini Adapter] 在代码块中找到 JSON');
         }
       } else {
-        // Method 2: Try to find raw JSON array
+        // 方法 2：尝试查找原始 JSON 数组
         const jsonMatch = responseText.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           jsonText = jsonMatch[0];
           if (this.settings.enable_debug_logging) {
-            console.log('[Gemini Adapter] Found raw JSON array');
+            console.log('[Gemini Adapter] 找到原始 JSON 数组');
           }
         }
       }
 
       if (!jsonText) {
-        console.warn('[Gemini Adapter] No JSON found in scoring response, full text:', responseText);
-        throw new Error('No JSON array found in response');
+        console.warn('[Gemini Adapter] 在评分响应中未找到 JSON，全文:', responseText);
+        throw new Error('在响应中未找到 JSON 数组');
       }
 
       const parsed = JSON.parse(jsonText) as Array<{
@@ -444,20 +432,20 @@ IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs
         reasoning?: string;
       }>;
 
-      // Validate that we got scores for all pairs
+      // 验证我们是否获得了所有配对的分数
       if (parsed.length !== pairs.length) {
-        console.warn(`[Gemini Adapter] Expected ${pairs.length} scores, got ${parsed.length}`);
+        console.warn(`[Gemini Adapter] 预期 ${pairs.length} 个分数，但获得了 ${parsed.length} 个`);
       }
 
-      // Sort by pair_id if present, to ensure correct order
+      // 如果存在，则按 pair_id 排序，以确保顺序正确
       if (parsed[0]?.pair_id !== undefined) {
         parsed.sort((a, b) => (a.pair_id || 0) - (b.pair_id || 0));
         if (this.settings.enable_debug_logging) {
-          console.log('[Gemini Adapter] Sorted scores by pair_id');
+          console.log('[Gemini Adapter] 已按 pair_id 对分数进行排序');
         }
       }
 
-      // Convert to ScoreResult format (without pair_id)
+      // 转换为 ScoreResult 格式（不含 pair_id）
       return parsed.map(item => ({
         note_id_1: item.note_id_1,
         note_id_2: item.note_id_2,
@@ -465,14 +453,14 @@ IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs
         reasoning: item.reasoning
       }));
     } catch (error) {
-      console.error('[Gemini Adapter] Failed to parse scoring response:', error);
-      console.error('[Gemini Adapter] Response text was:', responseText);
-      // Return default scores if parsing fails
+      console.error('[Gemini Adapter] 解析评分响应失败:', error);
+      console.error('[Gemini Adapter] 响应文本为:', responseText);
+      // 如果解析失败，则返回默认分数
       return pairs.map(pair => ({
         note_id_1: pair.note_id_1,
         note_id_2: pair.note_id_2,
         score: 5,
-        reasoning: 'Failed to parse LLM response'
+        reasoning: '解析 LLM 响应失败'
       }));
     }
   }
@@ -480,57 +468,57 @@ IMPORTANT: Your response must be a valid JSON array with exactly ${request.pairs
   private parseTaggingResponse(responseText: string, notes: NoteForTagging[]): TagResult[] {
     try {
       if (this.settings.enable_debug_logging) {
-        console.log('[Gemini Adapter] Raw response text:', responseText);
+        console.log('[Gemini Adapter] 原始响应文本:', responseText);
       }
 
-      // Try to extract JSON from various formats
+      // 尝试从各种格式中提取 JSON
       let jsonText = '';
 
-      // Method 1: Try to find JSON in markdown code blocks
+      // 方法 1：尝试在 markdown 代码块中查找 JSON
       const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (codeBlockMatch) {
         jsonText = codeBlockMatch[1].trim();
         if (this.settings.enable_debug_logging) {
-          console.log('[Gemini Adapter] Found JSON in code block');
+          console.log('[Gemini Adapter] 在代码块中找到 JSON');
         }
       } else {
-        // Method 2: Try to find raw JSON array
+        // 方法 2：尝试查找原始 JSON 数组
         const jsonMatch = responseText.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           jsonText = jsonMatch[0];
           if (this.settings.enable_debug_logging) {
-            console.log('[Gemini Adapter] Found raw JSON array');
+            console.log('[Gemini Adapter] 找到原始 JSON 数组');
           }
         }
       }
 
       if (!jsonText) {
-        console.warn('[Gemini Adapter] No JSON found in response, full text:', responseText);
-        throw new Error('No JSON array found in response');
+        console.warn('[Gemini Adapter] 在响应中未找到 JSON，全文:', responseText);
+        throw new Error('在响应中未找到 JSON 数组');
       }
 
       const parsed = JSON.parse(jsonText) as TagResult[];
 
       if (parsed.length !== notes.length) {
-        console.warn(`[Gemini Adapter] Expected ${notes.length} tag results, got ${parsed.length}`);
+        console.warn(`[Gemini Adapter] 预期 ${notes.length} 个标签结果，但获得了 ${parsed.length} 个`);
       }
 
       return parsed;
     } catch (error) {
-      console.error('[Gemini Adapter] Failed to parse tagging response:', error);
-      console.error('[Gemini Adapter] Response text was:', responseText);
-      // Return empty tags if parsing fails
+      console.error('[Gemini Adapter] 解析标记响应失败:', error);
+      console.error('[Gemini Adapter] 响应文本为:', responseText);
+      // 如果解析失败，则返回空标签
       return notes.map(note => ({
         note_id: note.note_id,
         tags: [],
-        reasoning: 'Failed to parse LLM response'
+        reasoning: '解析 LLM 响应失败'
       }));
     }
   }
 }
 
 /**
- * OpenAI adapter (GPT-4, GPT-3.5, etc.)
+ * OpenAI 适配器 (GPT-4, GPT-3.5 等)
  */
 class OpenAIAdapter implements LLMAdapter {
   private settings: PluginSettings;
@@ -543,12 +531,12 @@ class OpenAIAdapter implements LLMAdapter {
 
   async scoreBatch(request: ScoringBatchRequest): Promise<ScoringBatchResponse> {
     if (!this.settings.ai_api_key) {
-      throw new Error('OpenAI API key not configured. Please set it in plugin settings.');
+      throw new Error('OpenAI API 密钥未配置。请在插件设置中设置。');
     }
 
     const prompt = this.buildScoringPrompt(request);
 
-    // OpenAI API endpoint: {base_url}/chat/completions
+    // OpenAI API 端点: {base_url}/chat/completions
     const url = `${this.settings.ai_api_url}/chat/completions`;
 
     const body = {
@@ -565,7 +553,7 @@ class OpenAIAdapter implements LLMAdapter {
     };
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[OpenAI Adapter] Scoring ${request.pairs.length} note pairs`);
+      console.log(`[OpenAI Adapter] 正在对 ${request.pairs.length} 个笔记配对进行评分`);
     }
 
     const response = await this.apiService.makePostRequest(url, {
@@ -590,7 +578,7 @@ class OpenAIAdapter implements LLMAdapter {
 
   async generateTagsBatch(request: TaggingBatchRequest): Promise<TaggingBatchResponse> {
     if (!this.settings.ai_api_key) {
-      throw new Error('OpenAI API key not configured. Please set it in plugin settings.');
+      throw new Error('OpenAI API 密钥未配置。请在插件设置中设置。');
     }
 
     const prompt = this.buildTaggingPrompt(request);
@@ -611,7 +599,7 @@ class OpenAIAdapter implements LLMAdapter {
     };
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[OpenAI Adapter] Generating tags for ${request.notes.length} notes`);
+      console.log(`[OpenAI Adapter] 正在为 ${request.notes.length} 个笔记生成标签`);
     }
 
     const response = await this.apiService.makePostRequest(url, {
@@ -637,16 +625,16 @@ class OpenAIAdapter implements LLMAdapter {
   private buildScoringPrompt(request: ScoringBatchRequest): string {
     const basePrompt = request.prompt || this.settings.custom_scoring_prompt;
 
-    let prompt = `${basePrompt}\n\nPlease score the following note pairs on a scale of 0-10 for relevance:\n\n`;
+    let prompt = `${basePrompt}\n\n请按 0-10 的等级对以下笔记配对的相关性进行评分:\n\n`;
 
     request.pairs.forEach((pair, index) => {
-      prompt += `Pair ${index + 1}:\n`;
-      prompt += `Note A: "${pair.title_1}"\n${pair.content_1.substring(0, 500)}\n\n`;
-      prompt += `Note B: "${pair.title_2}"\n${pair.content_2.substring(0, 500)}\n\n`;
-      prompt += `Similarity Score: ${pair.similarity_score.toFixed(3)}\n\n`;
+      prompt += `配对 ${index + 1}:\n`;
+      prompt += `笔记 A: "${pair.title_1}"\n${pair.content_1.substring(0, 500)}\n\n`;
+      prompt += `笔记 B: "${pair.title_2}"\n${pair.content_2.substring(0, 500)}\n\n`;
+      prompt += `相似度分数: ${pair.similarity_score.toFixed(3)}\n\n`;
     });
 
-    prompt += '\nRespond with JSON object containing "scores" array: {"scores": [{"note_id_1": "id1", "note_id_2": "id2", "score": 7, "reasoning": "..."}, ...]}';
+    prompt += '\n以包含 "scores" 数组的 JSON 对象响应: {"scores": [{"note_id_1": "id1", "note_id_2": "id2", "score": 7, "reasoning": "..."}, ...]}';
 
     return prompt;
   }
@@ -654,20 +642,20 @@ class OpenAIAdapter implements LLMAdapter {
   private buildTaggingPrompt(request: TaggingBatchRequest): string {
     const basePrompt = request.prompt || this.settings.custom_tagging_prompt;
 
-    let prompt = `${basePrompt}\n\nGenerate ${request.min_tags || 3}-${request.max_tags || 5} relevant tags for each note:\n\n`;
+    let prompt = `${basePrompt}\n\n为每个笔记生成 ${request.min_tags || 3}-${request.max_tags || 5} 个相关标签:\n\n`;
 
     request.notes.forEach((note) => {
-      prompt += `Note ID: ${note.note_id}\n`;
-      prompt += `Title: "${note.title}"\n`;
-      prompt += `Content: ${note.content.substring(0, 500)}\n`;
+      prompt += `笔记 ID: ${note.note_id}\n`;
+      prompt += `标题: "${note.title}"\n`;
+      prompt += `内容: ${note.content.substring(0, 500)}\n`;
       if (note.existing_tags.length > 0) {
-        prompt += `Existing tags: ${note.existing_tags.join(', ')}\n`;
+        prompt += `现有标签: ${note.existing_tags.join(', ')}\n`;
       }
       prompt += '\n';
     });
 
-    prompt += '\nRespond with JSON object using exact Note IDs from input:\n';
-    prompt += '{"results": [{"note_id": "<exact UUID from input>", "tags": ["tag1", "tag2"]}, ...]}';
+    prompt += '\n使用输入中的确切笔记 ID 以 JSON 对象响应:\n';
+    prompt += '{"results": [{"note_id": "<输入中的确切 UUID>", "tags": ["tag1", "tag2"]}, ...]}';
 
     return prompt;
   }
@@ -678,17 +666,17 @@ class OpenAIAdapter implements LLMAdapter {
       const scores = parsed.scores || [];
 
       if (scores.length !== pairs.length) {
-        console.warn(`[OpenAI Adapter] Expected ${pairs.length} scores, got ${scores.length}`);
+        console.warn(`[OpenAI Adapter] 预期 ${pairs.length} 个分数，但获得了 ${scores.length} 个`);
       }
 
       return scores as ScoreResult[];
     } catch (error) {
-      console.error('[OpenAI Adapter] Failed to parse scoring response:', error);
+      console.error('[OpenAI Adapter] 解析评分响应失败:', error);
       return pairs.map(pair => ({
         note_id_1: pair.note_id_1,
         note_id_2: pair.note_id_2,
         score: 5,
-        reasoning: 'Failed to parse LLM response'
+        reasoning: '解析 LLM 响应失败'
       }));
     }
   }
@@ -699,16 +687,16 @@ class OpenAIAdapter implements LLMAdapter {
       const results = parsed.results || [];
 
       if (results.length !== notes.length) {
-        console.warn(`[OpenAI Adapter] Expected ${notes.length} tag results, got ${results.length}`);
+        console.warn(`[OpenAI Adapter] 预期 ${notes.length} 个标签结果，但获得了 ${results.length} 个`);
       }
 
       return results as TagResult[];
     } catch (error) {
-      console.error('[OpenAI Adapter] Failed to parse tagging response:', error);
+      console.error('[OpenAI Adapter] 解析标记响应失败:', error);
       return notes.map(note => ({
         note_id: note.note_id,
         tags: [],
-        reasoning: 'Failed to parse LLM response'
+        reasoning: '解析 LLM 响应失败'
       }));
     }
   }

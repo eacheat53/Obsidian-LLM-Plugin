@@ -1,124 +1,127 @@
 /**
- * Type definitions for cache data structures
+ * 缓存数据结构的类型定义
  */
 
 import { NoteId, NoteMetadata, NotePairScore, UnixTimestamp } from './index';
 
 /**
- * Cache statistics for performance monitoring
+ * 用于性能监控的缓存统计信息
  */
 export interface CacheStatistics {
-  /** Total number of notes in cache */
+  /** 缓存中的笔记总数 */
   total_notes: number;
 
-  /** Total number of embedding files */
+  /** 嵌入文件总数 */
   total_embeddings: number;
 
-  /** Total number of note pair scores */
+  /** 笔记配对分数总数 */
   total_scores: number;
 
-  /** Notes no longer in vault but still in cache */
+  /** 不再存在于 vault 中但仍在缓存中的笔记 */
   orphaned_notes: number;
 }
 
 /**
- * Master index cache file structure (index.json)
+ * 主索引缓存文件结构 (index.json)
  */
 export interface MasterIndex {
-  /** Schema version (semantic versioning) */
+  /** 模式版本（语义化版本） */
   version: string;
 
-  /** When the cache was last modified (Unix timestamp in ms) */
+  /** 缓存上次修改的时间（Unix 时间戳，毫秒） */
   last_updated: UnixTimestamp;
 
-  /** Map of note_id to NoteMetadata */
+  /** note_id 到 NoteMetadata 的映射 */
   notes: Record<NoteId, NoteMetadata>;
 
   /**
-   * Map of composite key 'noteId1:noteId2' to NotePairScore
-   * Note: noteId1 must be lexicographically smaller than noteId2
+   * 复合键 'noteId1:noteId2' 到 NotePairScore 的映射
+   * 注意：noteId1 在字典序上必须小于 noteId2
    */
   scores: Record<string, NotePairScore>;
 
-  /** Aggregate statistics */
+  /** 聚合统计信息 */
   stats: CacheStatistics;
+
+  /** 链接台账：记录每个笔记由插件插入过的目标 note_id 列表 */
+  link_ledger?: Record<NoteId, NoteId[]>;
 }
 
 /**
- * Cache file paths configuration
+ * 缓存文件路径配置
  */
 export interface CachePaths {
-  /** Root cache directory */
+  /** 根缓存目录 */
   cache_dir: string;
 
-  /** Master index file path */
+  /** 主索引文件路径 */
   index_file: string;
 
-  /** Embeddings directory path */
+  /** 嵌入目录路径 */
   embeddings_dir: string;
 }
 
 /**
- * Options for cache operations
+ * 缓存操作选项
  */
 export interface CacheLoadOptions {
-  /** Create cache if it doesn't exist */
+  /** 如果缓存不存在则创建 */
   create_if_missing?: boolean;
 
-  /** Validate schema version */
+  /** 验证模式版本 */
   validate_schema?: boolean;
 
-  /** Perform orphaned data detection */
+  /** 执行孤立数据检测 */
   detect_orphans?: boolean;
 }
 
 /**
- * Options for cache save operations
+ * 缓存保存操作选项
  */
 export interface CacheSaveOptions {
-  /** Use atomic writes (write to temp file, then rename) */
+  /** 使用原子写入（写入临时文件，然后重命名） */
   atomic?: boolean;
 
-  /** Update statistics before saving */
+  /** 保存前更新统计信息 */
   update_stats?: boolean;
 
-  /** Pretty-print JSON for debugging */
+  /** 为调试目的美化打印 JSON */
   pretty_print?: boolean;
 }
 
 /**
- * Result of cache load operation
+ * 缓存加载操作的结果
  */
 export interface CacheLoadResult {
-  /** Whether cache was loaded successfully */
+  /** 缓存是否成功加载 */
   success: boolean;
 
-  /** The loaded master index (undefined if failed) */
+  /** 加载的主索引（如果失败则为 undefined） */
   index?: MasterIndex;
 
-  /** Error message if failed */
+  /** 如果失败则为错误消息 */
   error?: string;
 
-  /** Whether a new cache was created */
+  /** 是否创建了新缓存 */
   created_new: boolean;
 
-  /** Schema migration performed */
+  /** 已执行模式迁移 */
   migrated: boolean;
 }
 
 /**
- * Result of embedding load operation
+ * 嵌入加载操作的结果
  */
 export interface EmbeddingLoadResult {
-  /** Whether embedding was loaded successfully */
+  /** 嵌入是否成功加载 */
   success: boolean;
 
-  /** The embedding vector (undefined if failed) */
+  /** 嵌入向量（如果失败则为 undefined） */
   embedding?: number[];
 
-  /** Error message if failed */
+  /** 如果失败则为错误消息 */
   error?: string;
 
-  /** Whether embedding was loaded from cache or needs generation */
+  /** 嵌入是从缓存加载还是需要生成 */
   from_cache: boolean;
 }

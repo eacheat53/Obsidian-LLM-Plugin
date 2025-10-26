@@ -1,6 +1,6 @@
 /**
- * AI logic service for core workflows
- * Orchestrates similarity calculation, AI scoring, and tag generation
+ * AI 逻辑服务（核心工作流）
+ * 负责相似度计算、AI 打分与标签生成的编排
  */
 
 import { App, TFile } from 'obsidian';
@@ -13,7 +13,7 @@ import { cosineSimilarity } from '../utils/vector-math';
 import { extractMainContent } from '../utils/frontmatter-parser';
 
 /**
- * Service for AI-powered note analysis
+ * 面向笔记分析的 AI 能力服务
  */
 export class AILogicService {
   private app: App;
@@ -34,22 +34,81 @@ export class AILogicService {
   }
 
   /**
-   * Calculate cosine similarities between all note pairs
-   * Uses vectorized operations for performance
+   * 仅计算“涉及特定笔记”的余弦相似度（智能模式用）
+   * 只为发生变化的笔记与全量笔记生成组合并计算相似度
    *
-   * @param embeddings - Map of note_id to embedding vector
-   * @returns Array of note pairs with similarity scores above threshold
+   * @param embeddings - 全量笔记的向量 Map（note_id -> 向量）
+   * @param targetNoteIds - 发生变化、需要重算的笔记集合
+   * @returns 涉及目标笔记且相似度超过阈值的配对列表
+   */
+  async calculateSimilaritiesForNotes(
+    embeddings: Map<NoteId, number[]>,
+    targetNoteIds: Set<NoteId>
+  ): Promise<NotePairScore[]> {
+    const pairs: NotePairScore[] = [];
+    const pairKeySet = new Set<string>();
+    const noteIds = Array.from(embeddings.keys());
+
+    if (this.settings.enable_debug_logging) {
+      console.log(`[AI Logic] Calculating similarities for ${targetNoteIds.size} changed notes against ${noteIds.length} total notes`);
+    }
+
+    // 对每个变化的笔记，与所有其它笔记计算相似度
+    for (const targetId of targetNoteIds) {
+      const targetEmbedding = embeddings.get(targetId);
+      if (!targetEmbedding) continue;
+
+      for (const otherId of noteIds) {
+        // 跳过与自身比较
+        if (targetId === otherId) continue;
+
+        const otherEmbedding = embeddings.get(otherId);
+        if (!otherEmbedding) continue;
+
+        // Calculate cosine similarity
+        const similarity = cosineSimilarity(targetEmbedding, otherEmbedding);
+
+        // Only keep pairs above threshold
+        if (similarity >= this.settings.similarity_threshold) {
+          // 固定配对顺序（字典序较小的 ID 在前）
+          const [noteId1, noteId2] = targetId < otherId ? [targetId, otherId] : [otherId, targetId];
+
+          pairs.push({
+            note_id_1: noteId1,
+            note_id_2: noteId2,
+            similarity_score: similarity,
+            ai_score: 0, // Will be filled by scorePairs()
+            last_scored: Date.now(),
+          });
+        }
+      }
+    }
+
+    if (this.settings.enable_debug_logging) {
+      console.log(`[AI Logic] Found ${pairs.length} pairs involving changed notes above threshold ${this.settings.similarity_threshold}`);
+    }
+
+    return pairs;
+  }
+
+  /**
+   * 计算全量笔记两两之间的余弦相似度
+   * 使用向量化处理以提升性能
+   *
+   * @param embeddings - 笔记向量映射（note_id -> 向量）
+   * @returns 超过阈值的配对列表
    */
   async calculateSimilarities(
     embeddings: Map<NoteId, number[]>
   ): Promise<NotePairScore[]> {
     const pairs: NotePairScore[] = [];
+    const pairKeySet = new Set<string>();
     const noteIds = Array.from(embeddings.keys());
 
     if (this.settings.enable_debug_logging) {
       console.log(`[AI Logic] Calculating similarities for ${noteIds.length} notes`);
 
-      // Check if all embeddings are identical (debugging)
+      // 调试：检查所有向量是否异常一致
       const firstEmbedding = embeddings.get(noteIds[0]);
       let allIdentical = true;
       let sampleDifferences = 0;
@@ -73,14 +132,14 @@ export class AILogicService {
         console.log('[AI Logic] Embeddings are different (good)');
       }
 
-      // Log embedding statistics
+      // 打印向量统计信息
       if (firstEmbedding) {
         console.log('[AI Logic] Embedding dimension:', firstEmbedding.length);
         console.log('[AI Logic] Sample values:', firstEmbedding.slice(0, 5));
       }
     }
 
-    // Track similarity distribution for debugging
+    // 调试：统计相似度分布
     const similarityBuckets = new Map<string, number>([
       ['0.0-0.5', 0],
       ['0.5-0.6', 0],
@@ -90,7 +149,7 @@ export class AILogicService {
       ['0.9-1.0', 0],
     ]);
 
-    // Calculate pairwise similarities
+    // 计算两两相似度
     for (let i = 0; i < noteIds.length; i++) {
       for (let j = i + 1; j < noteIds.length; j++) {
         const noteId1 = noteIds[i];
@@ -111,15 +170,19 @@ export class AILogicService {
           else similarityBuckets.set('0.9-1.0', similarityBuckets.get('0.9-1.0')! + 1);
         }
 
-        // Only keep pairs above threshold
+        // 仅保留超过阈值的配对，且去重
         if (similarity >= this.settings.similarity_threshold) {
-          pairs.push({
-            note_id_1: noteId1,
-            note_id_2: noteId2,
-            similarity_score: similarity,
-            ai_score: 0, // Will be filled by scorePairs()
-            last_scored: Date.now(),
-          });
+          const key = noteId1 < noteId2 ? `${noteId1}:${noteId2}` : `${noteId2}:${noteId1}`;
+          if (!pairKeySet.has(key)) {
+            pairKeySet.add(key);
+            pairs.push({
+              note_id_1: noteId1,
+              note_id_2: noteId2,
+              similarity_score: similarity,
+              ai_score: 0,
+              last_scored: Date.now(),
+            });
+          }
         }
       }
     }
@@ -139,13 +202,13 @@ export class AILogicService {
   }
 
   /**
-   * Score note pairs using LLM for relevance
-   * Batches API requests for efficiency
+   * 使用 LLM 对配对进行相关性打分
+   * 按批次调用 API 以提高效率
    *
-   * @param pairs - Note pairs to score
-   * @returns Scored pairs with AI scores
+   * @param pairs - 待打分的配对
+   * @returns 带有 AI 分数的配对结果
    */
-  async scorePairs(pairs: NotePairScore[]): Promise<NotePairScore[]> {
+  async scorePairs(pairs: NotePairScore[], shouldCancel?: () => boolean): Promise<NotePairScore[]> {
     if (pairs.length === 0) {
       return [];
     }
@@ -159,20 +222,24 @@ export class AILogicService {
       throw new Error('Master index not loaded');
     }
 
-    // Process in batches
+    // 按批次处理
     const batchSize = this.settings.batch_size_scoring;
     const scoredPairs: NotePairScore[] = [];
 
     for (let i = 0; i < pairs.length; i += batchSize) {
+      if (shouldCancel && shouldCancel()) {
+        console.warn('[AI Logic] 评分已被取消');
+        throw new Error('Task cancelled by user');
+      }
       const batch = pairs.slice(i, i + batchSize);
 
-      // Build note pair data for API
+      // 构建供 API 使用的配对数据
       const pairsForScoring: NotePairForScoring[] = await Promise.all(
         batch.map(async pair => {
           const note1 = masterIndex.notes[pair.note_id_1];
           const note2 = masterIndex.notes[pair.note_id_2];
 
-          // Get file objects
+          // 获取文件对象
           const file1 = this.app.vault.getAbstractFileByPath(note1.file_path) as TFile;
           const file2 = this.app.vault.getAbstractFileByPath(note2.file_path) as TFile;
 
@@ -194,10 +261,19 @@ export class AILogicService {
         })
       );
 
-      // Call LLM API for scoring
+      // 调用 LLM API 进行打分
       const response = await this.apiService.callLLMAPI({ pairs: pairsForScoring });
 
-      // Merge AI scores back into pairs
+      // 已移除此处的人类可读日志，避免与主流程重复输出
+      if (this.settings.enable_debug_logging) {
+        try {
+          // no-op
+        } catch (e) {
+          console.warn('[AI Logic] 可读评分日志输出失败：', e);
+        }
+      }
+
+      // 合并 AI 分数到配对结果中
       for (let j = 0; j < batch.length; j++) {
         const pair = batch[j];
         const scoreResult = response.scores[j];
@@ -218,11 +294,11 @@ export class AILogicService {
   }
 
   /**
-   * Generate AI tags for multiple notes in a single batch
-   * Uses batch_size_tagging setting to optimize API calls
+   * 批量为多个笔记生成 AI 标签
+   * 结合 batch_size_tagging 设置优化 API 调用
    *
-   * @param noteIds - Array of note IDs to generate tags for
-   * @returns Map of note_id -> generated tags
+   * @param noteIds - 需要生成标签的笔记 ID 列表
+   * @returns note_id -> 生成标签 的映射
    */
   async generateTagsBatch(noteIds: NoteId[]): Promise<Map<NoteId, string[]>> {
     const masterIndex = this.cacheService.getMasterIndex();
@@ -232,7 +308,7 @@ export class AILogicService {
 
     const resultMap = new Map<NoteId, string[]>();
 
-    // Prepare all notes for tagging
+    // 准备需要打标签的笔记集合
     const notesForTagging: NoteForTagging[] = [];
 
     for (const noteId of noteIds) {
@@ -269,14 +345,14 @@ export class AILogicService {
       console.log(`[AI Logic] Generating tags for ${notesForTagging.length} notes in batch`);
     }
 
-    // Call LLM API with all notes at once (respecting batch_size_tagging in the calling code)
+    // 一次性调用 LLM API（调用方会按 batch_size_tagging 分批）
     const response = await this.apiService.callLLMTaggingAPI({
       notes: notesForTagging,
       min_tags: 3,
       max_tags: 5,  // Updated to match new prompt limit
     });
 
-    // Build result map
+    // 构建返回映射
     for (const result of response.results) {
       resultMap.set(result.note_id, result.tags);
     }
@@ -289,11 +365,11 @@ export class AILogicService {
   }
 
   /**
-   * Generate AI tags for a note
-   * Uses LLM batch tagging endpoint
+   * 为单个笔记生成 AI 标签
+   * 复用 LLM 批量打标接口
    *
-   * @param noteId - Note to generate tags for
-   * @returns Array of generated tags
+   * @param noteId - 目标笔记 ID
+   * @returns 生成的标签数组
    */
   async generateTags(noteId: NoteId): Promise<string[]> {
     const masterIndex = this.cacheService.getMasterIndex();
@@ -316,7 +392,7 @@ export class AILogicService {
     const fullContent = await this.app.vault.read(file);
     const mainContent = extractMainContent(fullContent);
 
-    // Prepare tagging request
+    // 组装打标请求
     const noteForTagging: NoteForTagging = {
       note_id: noteId,
       title: file.basename,
@@ -328,7 +404,7 @@ export class AILogicService {
       console.log(`[AI Logic] Generating tags for note: ${file.basename}`);
     }
 
-    // Call LLM API
+    // 调用 LLM API
     const response = await this.apiService.callLLMTaggingAPI({
       notes: [noteForTagging],
       min_tags: 3,
@@ -345,11 +421,11 @@ export class AILogicService {
   }
 
   /**
-   * Filter note pairs by configured thresholds
-   * Applies similarity_threshold and min_ai_score
+   * 按配置阈值过滤配对
+   * 同时应用 similarity_threshold 与 min_ai_score
    *
-   * @param pairs - Note pairs with scores
-   * @returns Filtered pairs that meet criteria
+   * @param pairs - 已打分的配对
+   * @returns 满足阈值条件的配对
    */
   filterByThresholds(pairs: NotePairScore[]): NotePairScore[] {
     return pairs.filter(pair =>
@@ -359,13 +435,13 @@ export class AILogicService {
   }
 
   /**
-   * Check if a note pair should be skipped (smart mode)
-   * Looks up existing scores in cache
+   * 判断配对是否可跳过（智能模式）
+   * 通过缓存中已有分数的时效判断
    *
-   * @param noteId1 - First note ID
-   * @param noteId2 - Second note ID
-   * @param forceMode - If true, always process (ignore cache)
-   * @returns True if pair should be skipped
+   * @param noteId1 - 笔记 1 的 ID
+   * @param noteId2 - 笔记 2 的 ID
+   * @param forceMode - 强制模式下不跳过
+   * @returns 是否跳过该配对
    */
   shouldSkipPair(noteId1: NoteId, noteId2: NoteId, forceMode: boolean): boolean {
     if (forceMode) {
@@ -377,11 +453,11 @@ export class AILogicService {
       return false;
     }
 
-    // Check if pair exists in cache
+    // 查询缓存中是否已有该配对
     const pairKey = this.createPairKey(noteId1, noteId2);
     const existingScore = masterIndex.scores[pairKey];
 
-    // Skip if we have a recent score
+    // 若评分较新则跳过
     if (existingScore) {
       const ageInDays = (Date.now() - existingScore.last_scored) / (1000 * 60 * 60 * 24);
       // Skip if scored within last 7 days
@@ -392,12 +468,12 @@ export class AILogicService {
   }
 
   /**
-   * Create composite key for note pair scoring
-   * Ensures consistent ordering (lexicographically smaller ID first)
+   * 生成打分配对的复合键
+   * 保证顺序一致（字典序较小的 ID 在前）
    *
-   * @param noteId1 - First note ID
-   * @param noteId2 - Second note ID
-   * @returns Composite key string
+   * @param noteId1 - 笔记 1 的 ID
+   * @param noteId2 - 笔记 2 的 ID
+   * @returns 复合键字符串
    */
   private createPairKey(noteId1: NoteId, noteId2: NoteId): string {
     return noteId1 < noteId2 ? `${noteId1}:${noteId2}` : `${noteId2}:${noteId1}`;

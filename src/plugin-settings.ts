@@ -1,16 +1,16 @@
 /**
- * Plugin settings data model and defaults
+ * 插件设置数据模型和默认值
  */
 
 import { LLMProvider } from './types/api-types';
 
 /**
- * Language type for UI translations
+ * UI 翻译的语言类型
  */
 export type Language = 'en' | 'zh';
 
 /**
- * Provider-specific configuration
+ * 特定于提供商的配置
  */
 export interface ProviderConfig {
   api_url: string;
@@ -19,131 +19,131 @@ export interface ProviderConfig {
 }
 
 /**
- * Complete plugin settings interface with all 23 configurable parameters
+ * 包含所有 23 个可配置参数的完整插件设置界面
  */
 export interface PluginSettings {
   // ============================================================================
-  // UI Preferences
+  // UI 首选项
   // ============================================================================
 
-  /** UI language (English or Chinese) */
+  /** UI 语言（英语或中文） */
   language: Language;
 
   // ============================================================================
-  // Jina AI Linker Settings
+  // Jina AI Linker 设置
   // ============================================================================
 
-  /** Jina AI API key (password field) */
+  /** Jina AI API 密钥（密码字段） */
   jina_api_key: string;
 
-  /** Jina model name (e.g., 'jina-embeddings-v2-base-en') */
+  /** Jina 模型名称（例如，'jina-embeddings-v2-base-en'） */
   jina_model_name: string;
 
-  /** Maximum characters to send to Jina API (truncation limit) */
+  /** 发送到 Jina API 的最大字符数（截断限制） */
   jina_max_chars: number;
 
-  /** Maximum input tokens for Jina API */
+  /** Jina API 的最大输入令牌数 */
   jina_max_input_tokens: number;
 
   // ============================================================================
-  // AI Smart Scoring Configuration
+  // AI 智能评分配置
   // ============================================================================
 
-  /** AI provider selection ('gemini', 'openai', etc.) */
+  /** AI 提供商选择（'gemini'、'openai' 等） */
   ai_provider: LLMProvider;
 
-  /** API URL for the selected LLM provider */
+  /** 所选 LLM 提供商的 API URL */
   ai_api_url: string;
 
-  /** API key for the LLM provider (password field) */
+  /** LLM 提供商的 API 密钥（密码字段） */
   ai_api_key: string;
 
-  /** Model name for LLM (e.g., 'gemini-pro', 'gpt-4') */
+  /** LLM 的模型名称（例如，'gemini-pro'、'gpt-4'） */
   ai_model_name: string;
 
-  /** Maximum input tokens for LLM API */
+  /** LLM API 的最大输入令牌数 */
   llm_max_input_tokens: number;
 
-  /** Provider-specific configurations (saved per provider) */
+  /** 特定于提供商的配置（按提供商保存） */
   provider_configs: Record<LLMProvider, ProviderConfig>;
 
   // ============================================================================
-  // Processing Parameters
+  // 处理参数
   // ============================================================================
 
-  /** Default scan path (e.g., "/" for entire vault) */
+  /** 默认扫描路径（例如，“/”表示整个 vault） */
   default_scan_path: string;
 
-  /** Excluded folders (comma-separated, e.g., ".obsidian, Attachments") */
+  /** 排除的文件夹（逗号分隔，例如，“.obsidian, Attachments”） */
   excluded_folders: string;
 
-  /** Excluded file patterns (comma-separated, e.g., "*.excalidraw") */
+  /** 排除的文件模式（逗号分隔，例如，“*.excalidraw”） */
   excluded_patterns: string;
 
   // ============================================================================
-  // Link Insertion Settings
+  // 链接插入设置
   // ============================================================================
 
-  /** Jina similarity threshold (0.0 to 1.0) */
+  /** Jina 相似度阈值（0.0 到 1.0） */
   similarity_threshold: number;
 
-  /** Minimum AI score for link insertion (0 to 10) */
+  /** 链接插入的最低 AI 分数（0 到 10） */
   min_ai_score: number;
 
-  /** Maximum links to insert per note (1 to 50) */
+  /** 每个笔记最多插入的链接数（1 到 50） */
   max_links_per_note: number;
 
   // ============================================================================
-  // AI Scoring Prompt Settings
+  // AI 评分提示设置
   // ============================================================================
 
-  /** Whether to use custom prompt for scoring */
+  /** 是否使用自定义提示进行评分 */
   use_custom_scoring_prompt: boolean;
 
-  /** Custom prompt for AI scoring (if enabled) */
+  /** AI 评分的自定义提示（如果启用） */
   custom_scoring_prompt: string;
 
   // ============================================================================
-  // AI Tag Generation Settings
+  // AI 标签生成设置
   // ============================================================================
 
-  /** Whether to use custom prompt for tag generation */
+  /** 是否使用自定义提示进行标签生成 */
   use_custom_tagging_prompt: boolean;
 
-  /** Custom prompt for tag generation (if enabled) */
+  /** AI 标签生成的自定义提示（如果启用） */
   custom_tagging_prompt: string;
 
   // ============================================================================
-  // AI Batch Processing Parameters
+  // AI 批量处理参数
   // ============================================================================
 
-  /** Batch size for scoring requests (1 to 50 pairs per request) */
+  /** 评分请求的批量大小（每个请求 1 到 50 对） */
   batch_size_scoring: number;
 
-  /** Batch size for tagging requests (1 to 20 notes per request) */
+  /** 标记请求的批量大小（每个请求 1 到 20 个笔记） */
   batch_size_tagging: number;
 
   // ============================================================================
-  // Performance and Debugging
+  // 性能和调试
   // ============================================================================
 
-  /** Enable debug logging to console */
+  /** 启用控制台调试日志记录 */
   enable_debug_logging: boolean;
 
   // ============================================================================
-  // Internal State (not user-configurable)
+  // 内部状态（非用户可配置）
   // ============================================================================
 
-  /** Force mode default (always regenerate embeddings/scores) */
+  /** 强制模式默认值（始终重新生成嵌入/分数） */
   force_mode_default: boolean;
 }
 
 /**
- * Default prompt for AI scoring of note pairs
+ * AI 笔记配对评分的默认提示
  */
-export const DEFAULT_SCORING_PROMPT = `As an expert in evaluating note associations, please assess the relevance of note pairs provided in JSON format. The content may include diverse forms such as knowledge notes, poetry, creative inspiration, prose, emotional records, etc.
+export const DEFAULT_SCORING_PROMPT = `作为评估笔记关联的专家，请评估以 JSON 格式提供的笔记配对的相关性。内容可能包括知识笔记、诗歌、创意灵感、散文、情感记录等多种形式。
 
-You will receive input data in this JSON structure:
+您将收到以下 JSON 结构的输入数据：
 {
   "pairs": [
     {
@@ -155,84 +155,84 @@ You will receive input data in this JSON structure:
   ]
 }
 
-Provide an integer score from 0-10 for each pair based on these comprehensive criteria:
+根据这些综合标准，为每对提供一个 0-10 的整数分数：
 
-[Scoring Criteria:]
-10 points - Deep Association:
-  • Clear resonance in thought, emotion, or imagery between the contents
-  • One piece directly inspires, extends, or responds to the other
-  • Both pieces form a complete expressive whole, jointly constructing a richer artistic conception or idea
-  • Reading them together produces an "aha moment" bringing new insights
+[评分标准：]
+10 分 - 深度关联：
+  • 内容之间在思想、情感或意象上有明显的共鸣
+  • 一篇直接启发、扩展或回应另一篇
+  • 两篇共同构成一个完整的表达整体，共同构建更丰富的意境或思想
+  • 一起阅读会产生“顿悟时刻”，带来新的见解
 
-8-9 points - Strong Association:
-  • Share core emotions, imagery, or themes
-  • Express similar ideas but through different angles or forms
-  • Creative context or sources of inspiration are closely connected
-  • One piece can deepen understanding and appreciation of the other
+8-9 分 - 强关联：
+  • 共享核心情感、意象或主题
+  • 通过不同角度或形式表达相似的思想
+  • 创作背景或灵感来源紧密相连
+  • 一篇可以加深对另一篇的理解和欣赏
 
-6-7 points - Clear Association:
-  • Clear thematic or emotional connections exist
-  • Use similar imagery or expressions
-  • Connection points are rich enough to spark new thinking
-  • Reading them side by side enriches the overall experience
+6-7 分 - 清晰关联：
+  • 存在清晰的主题或情感联系
+  • 使用相似的意象或表达方式
+  • 连接点足够丰富，可以激发新的思考
+  • 并排阅读可以丰富整体体验
 
-4-5 points - Moderate Association:
-  • Some common elements, but overall directions differ
-  • Certain fragments or imagery resonate, but not the main body
-  • Connection is more subtle or requires interpretation
-  • Link may have inspirational value for some readers
+4-5 分 - 中度关联：
+  • 有一些共同元素，但整体方向不同
+  • 某些片段或意象产生共鸣，但不是主体部分
+  • 连接更微妙或需要解释
+  • 链接可能对某些读者具有启发价值
 
-2-3 points - Slight Association:
-  • Association limited to surface terminology or scattered concepts
-  • Themes, styles, or emotional tones are very different
-  • Connections need to be deliberately sought to be discovered
-  • Link value is limited, most readers will have difficulty perceiving the association
+2-3 分 - 轻微关联：
+  • 关联仅限于表面术语或零散概念
+  • 主题、风格或情感基调非常不同
+  • 需要刻意寻找才能发现联系
+  • 链接价值有限，大多数读者很难感知到关联
 
-0-1 points - Almost No Association:
-  • Content, themes, and imagery are almost completely different
-  • Cannot find obvious thought or emotional connections
-  • Link will not add value to reader's understanding of either content
-  • Reading them together does not produce meaningful associations or inspiration
+0-1 分 - 几乎无关联：
+  • 内容、主题和意象几乎完全不同
+  • 找不到明显的思想或情感联系
+  • 链接不会为读者对任一内容的理解增加价值
+  • 一起阅读不会产生有意义的关联或灵感
 
-Respond with a JSON array matching the input pairs. Each element must include:
-- pair_id: the ID from input
-- note_id_1: the ID from note_1
-- note_id_2: the ID from note_2
-- score: your assessment (0-10)
+使用与输入配对匹配的 JSON 数组进行响应。每个元素必须包括：
+- pair_id：来自输入的 ID
+- note_id_1：来自 note_1 的 ID
+- note_id_2：来自 note_2 的 ID
+- score：您的评估（0-10）
 
-Example output format:
+示例输出格式：
 [
   {"pair_id": 1, "note_id_1": "uuid1", "note_id_2": "uuid2", "score": 7},
   {"pair_id": 2, "note_id_1": "uuid3", "note_id_2": "uuid4", "score": 9}
 ]
 
-IMPORTANT: Output ONLY the JSON array. Do not include any explanations, markdown code blocks, or additional text!`;
+重要提示：仅输出 JSON 数组。不要包含任何解释、markdown 代码块或附加文本！`;
 
 /**
- * Default prompt for AI tag generation
+ * AI 标签生成的默认提示
  */
-export const DEFAULT_TAGGING_PROMPT = `You are an expert in knowledge management and the Zettelkasten method, skilled at building personal knowledge bases that are well-structured, easy to connect, and easy to retrieve.
+export const DEFAULT_TAGGING_PROMPT = `您是知识管理和 Zettelkasten 方法的专家，擅长构建结构良好、易于连接和易于检索的个人知识库。
 
-Your task is: For each note content I provide, generate a set of precise, concise, and systematic **Chinese tags**. These tags should reveal the core ideas of the note and help integrate it into a broader knowledge network.
+您的任务是：对于我提供的每个笔记内容，生成一组精确、简洁和系统的 **中文标签**。这些标签应揭示笔记的核心思想，并有助于将其整合到更广泛的知识网络中。
 
-Please strictly follow these principles:
-1. [Core Theme] Identify the most critical and core theme or keywords of the note.
-2. [Abstract Concepts] Extract concepts that can abstract higher-level thoughts.
-3. [Knowledge Domain] Use hierarchical tags to locate knowledge domains when possible, in the format: 哲学/分析哲学、计算机科学/机器学习
-4. [Connectivity] Consider which topics this note can meaningfully connect with.
-5. [Tag Limits] Generate **at most 5 tags** per note
-6. [Hierarchy Limit] Tags can have **at most 2 levels** (e.g., 哲学/分析哲学 ✓, 哲学/古希腊哲学/柏拉图 ✗)
+请严格遵守以下原则：
+1. [核心主题] 确定笔记最关键和核心的主题或关键字。
+2. [抽象概念] 提取可以抽象出更高级别思想的概念。
+3. [知识领域] 尽可能使用分层标签来定位知识领域，格式为：哲学/分析哲学、计算机科学/机器学习
+4. [连通性] 考虑此笔记可以与哪些主题进行有意义的连接。
+5. [标签限制] 每个笔记**最多生成 5 个标签**
+6. [层级限制] 标签**最多可以有 2 个层级**（例如，哲学/分析哲学 ✓, 哲学/古希腊哲学/柏拉图 ✗）
 
-You will receive note data in this format:
-- Note title
-- Note content (truncated preview)
-- Existing tags (if any)
+您将收到以下格式的笔记数据：
+- 笔记标题
+- 笔记内容（截断的预览）
+- 现有标签（如果有）
 
-Respond with a JSON array of objects. Each element must include:
-- note_id: the UUID from input
-- tags: array of generated tags (strings, max 5 tags, max 2 levels each)
+使用对象组成的 JSON 数组进行响应。每个元素必须包括：
+- note_id：来自输入的 UUID
+- tags：生成的标签数组（字符串，每个最多 5 个标签，每个最多 2 个层级）
 
-Example output format:
+示例输出格式：
 [
   {
     "note_id": "uuid1",
@@ -244,34 +244,34 @@ Example output format:
   }
 ]
 
-IMPORTANT: Output ONLY the JSON array. Do not include any explanations, markdown code blocks, reasoning, or additional text!`;
+重要提示：仅输出 JSON 数组。不要包含任何解释、markdown 代码块、推理或附加文本！`;
 
 /**
- * Default settings values
+ * 默认设置值
  */
 export const DEFAULT_SETTINGS: PluginSettings = {
-  // UI Preferences
+  // UI 首选项
   language: 'en',
 
-  // Jina AI Linker Settings
+  // Jina AI Linker 设置
   jina_api_key: '',
   jina_model_name: 'jina-embeddings-v3',
   jina_max_chars: 8000,
   jina_max_input_tokens: 8192,
 
-  // AI Smart Scoring Configuration
+  // AI 智能评分配置
   ai_provider: 'gemini',
   ai_api_url: 'https://generativelanguage.googleapis.com/v1beta/models',
   ai_api_key: '',
-  ai_model_name: 'gemini-2.5-flash',  // Using 2.5 with thinkingBudget to limit thinking tokens
+  ai_model_name: 'gemini-2.5-flash',  
   llm_max_input_tokens: 100000,
 
-  // Provider-specific configurations
+  // 特定于提供商的配置
   provider_configs: {
     gemini: {
       api_url: 'https://generativelanguage.googleapis.com/v1beta/models',
       api_key: '',
-      model_name: 'gemini-2.5-flash',  // Using 2.5 with thinkingBudget to limit thinking tokens
+      model_name: 'gemini-2.5-flash',  
     },
     openai: {
       api_url: 'https://api.openai.com/v1',
@@ -290,31 +290,31 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     },
   },
 
-  // Processing Parameters
+  // 处理参数
   default_scan_path: '/',
   excluded_folders: '.obsidian, .trash',
   excluded_patterns: '*.excalidraw, *.canvas',
 
-  // Link Insertion Settings
+  // 链接插入设置
   similarity_threshold: 0.7,
   min_ai_score: 7,
   max_links_per_note: 7,
 
-  // AI Scoring Prompt Settings
+  // AI 评分提示设置
   use_custom_scoring_prompt: false,
   custom_scoring_prompt: DEFAULT_SCORING_PROMPT,
 
-  // AI Tag Generation Settings
+  // AI 标签生成设置
   use_custom_tagging_prompt: false,
   custom_tagging_prompt: DEFAULT_TAGGING_PROMPT,
 
-  // AI Batch Processing Parameters
+  // AI 批量处理参数
   batch_size_scoring: 10,
   batch_size_tagging: 5,
 
-  // Performance and Debugging
+  // 性能和调试
   enable_debug_logging: false,
 
-  // Internal State
+  // 内部状态
   force_mode_default: false,
 };
