@@ -84,16 +84,20 @@
 
 ### Functional Requirements
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-001**: System MUST analyze note content using AI services (text embeddings and LLMs) to identify related notes
+- **FR-002**: System MUST recommend relevant note links based on semantic similarity calculations  
+- **FR-003**: Users MUST be able to configure API keys, model names, and similarity thresholds via settings panel
+- **FR-004**: System MUST persist note embeddings and AI scores in a JSON file to avoid redundant calculations
+- **FR-005**: System MUST automatically inject relevant note links in [[WikiLink]] format into user's markdown files
+- **FR-006**: System MUST generate and maintain unique note IDs in front-matter for stable data associations
+- **FR-007**: System MUST detect note content changes via content hashing for efficient incremental updates
+- **FR-008**: System MUST provide non-blocking progress feedback with cancellation option for long-running tasks
+- **FR-009**: System MUST run entirely within Obsidian's JavaScript environment without external dependencies
+- **FR-010**: System MUST handle errors gracefully and provide meaningful error messages to users
 
 *Example of marking unclear requirements:*
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-011**: System MUST authenticate with [NEEDS CLARIFICATION: which specific AI service APIs and their authentication methods?]
 
 ### Key Entities *(include if feature involves data)*
 
@@ -109,7 +113,11 @@
 
 ### Measurable Outcomes
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+- **SC-001**: Plugin successfully identifies and recommends relevant note links with 80%+ user satisfaction
+- **SC-002**: System processes note similarity calculations for 1000 notes within 5 minutes on standard hardware
+- **SC-003**: User can configure all necessary API settings via the settings panel without code changes
+- **SC-004**: Plugin maintains responsive UI during background processing of AI tasks (no UI freezing)
+- **SC-005**: Incremental updates detect and process only changed notes, reducing processing time by 90% for minor changes
+- **SC-006**: All data (embeddings, scores, note IDs) persists reliably in JSON file format across plugin restarts
+- **SC-007**: Progress dialog accurately reflects task completion percentage with option to cancel long operations
+- **SC-008**: TypeScript code maintains strict type checking with comprehensive JSDoc documentation coverage

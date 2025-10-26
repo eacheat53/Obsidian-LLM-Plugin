@@ -60,14 +60,14 @@ description: "Task list template for feature implementation"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-Examples of foundational tasks (adjust based on your project):
+Examples of foundational tasks for Obsidian plugin project:
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T004 Setup TypeScript configuration with strict type checking (tsconfig.json)
+- [ ] T005 [P] Implement unique ID generation for notes (UUID in front-matter)
+- [ ] T006 [P] Setup JSON-based data persistence framework for embeddings/cache
+- [ ] T007 Create base service modules per constitution: api-service.ts, ai-logic-service.ts, cache-service.ts, link-injector-service.ts
+- [ ] T008 Configure error handling and logging infrastructure for plugin context
+- [ ] T009 Setup content hash-based change detection system for incremental updates
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -83,17 +83,17 @@ Examples of foundational tasks (adjust based on your project):
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T010 [P] [US1] Contract test for [API endpoint] in tests/contract/[name].test.ts
+- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/[name].test.ts
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T012 [P] [US1] Create note entity definition in src/types/index.ts
+- [ ] T013 [P] [US1] Create embedding data structure in src/types/index.ts
+- [ ] T014 [US1] Implement core API service in src/services/api-service.ts (depends on T012, T013)
+- [ ] T015 [US1] Implement basic link injection logic in src/services/link-injector-service.ts
+- [ ] T016 [US1] Add validation and error handling for API requests
+- [ ] T017 [US1] Add logging for user story 1 operations in plugin context
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -107,14 +107,14 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T018 [P] [US2] Contract test for [API endpoint] in tests/contract/[name].test.ts
+- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/[name].test.ts
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T020 [P] [US2] Create similarity calculation utility in src/utils/similarity.ts
+- [ ] T021 [US2] Implement AI logic service in src/services/ai-logic-service.ts
+- [ ] T022 [US2] Implement similarity-based link recommendation in src/services/ai-logic-service.ts
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently

@@ -3,7 +3,7 @@
 **Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Note**: This template is filled in by the `/speckit.plan` command. See `.qwen/commands/speckit.plan.toml` for the execution workflow.
 
 ## Summary
 
@@ -17,21 +17,30 @@
   the iteration process.
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: TypeScript with strict type checking (ES2020+)  
+**Primary Dependencies**: Obsidian API, node-fetch for HTTP requests, uuid for ID generation  
+**Storage**: JSON file-based persistence (single JSON file for embeddings/cache)  
+**Testing**: Jest for unit testing, @testing-library for UI testing  
+**Target Platform**: Obsidian Plugin Platform (desktop applications)  
+**Project Type**: Single plugin project (TypeScript/JavaScript module)  
+**Performance Goals**: Responsive UI during async operations, efficient note similarity calculations  
+**Constraints**: Must run within Obsidian's sandbox, no external dependencies, limited memory usage  
+**Scale/Scope**: Works with Obsidian vaults of up to 10k notes, efficient incremental updates
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+This feature MUST comply with the Obsidian LLM Plugin Constitution:
+- Self-contained, pure TypeScript/JavaScript implementation
+- Zero external dependencies (no Python, Go, Java runtimes)
+- Single-process architecture with asynchronous operations
+- Module design: api-service.ts, ai-logic-service.ts, cache-service.ts, link-injector-service.ts
+- Unique IDs for notes in front-matter for data associations
+- Content hash-based change detection for incremental updates
+- Comprehensive settings panel for user configuration
+- Non-blocking progress UI for long-running tasks
+- Strict TypeScript with documentation
 
 ## Project Structure
 
@@ -56,43 +65,32 @@ specs/[###-feature]/
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
+# Single Obsidian plugin project
 src/
-├── models/
+├── main.ts                   # Plugin entry point
+├── ui/
+│   ├── settings-tab.ts       # Settings panel implementation
+│   ├── progress-modal.ts     # Progress dialog for long-running tasks
+│   └── components/           # Reusable UI components
 ├── services/
-├── cli/
-└── lib/
+│   ├── api-service.ts        # API requests to LLM/embedding services
+│   ├── ai-logic-service.ts   # Core AI logic (similarity, scoring, etc.)
+│   ├── cache-service.ts      # Data persistence and caching
+│   └── link-injector-service.ts # Link injection logic
+├── utils/
+│   ├── note-utils.ts         # Note processing utilities
+│   ├── id-generator.ts       # Unique ID generation for notes
+│   └── hash-utils.ts         # Content hashing for change detection
+└── types/
+    └── index.ts              # TypeScript type definitions
 
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+manifest.json                 # Obsidian plugin manifest
+package.json                  # NPM package configuration
+tsconfig.json                 # TypeScript compiler configuration
+styles.css                    # CSS styles for UI components
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: Single plugin project following Obsidian plugin architecture with modular service design per constitution
 
 ## Complexity Tracking
 

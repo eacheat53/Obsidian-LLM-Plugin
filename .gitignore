@@ -1,0 +1,39 @@
+# Node modules
+node_modules/
+
+# Build output
+main.js
+main.js.map
+*.js.map
+dist/
+
+# Obsidian workspace
+.obsidian/workspace*
+
+# macOS
+.DS_Store
+
+# Editor directories
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.local
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Cache directories
+.cache/
+.temp/
+
+# Test coverage
+coverage/
+draft.md

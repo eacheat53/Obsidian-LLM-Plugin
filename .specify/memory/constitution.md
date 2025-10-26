@@ -1,50 +1,40 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!-- SYNC IMPACT REPORT
+Version change: N/A (initial version) → 1.0.0
+List of modified principles: N/A
+Added sections: All principles based on user-provided Chinese principles
+Removed sections: Template placeholders
+Templates requiring updates: ⚠ pending - .specify/templates/plan-template.md, .specify/templates/spec-template.md, .specify/templates/tasks-template.md, .specify/templates/commands/*.toml
+Follow-up TODOs: None
+-->
+# Obsidian LLM Plugin Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### Core Project Goal
+Build a self-contained, pure TypeScript/JavaScript Obsidian plugin that utilizes AI services (text embeddings and large language models) to analyze note content and automatically recommend and insert relevant note links. The plugin MUST operate with zero external dependencies and MUST NOT require any external runtime environments (e.g., Python, Go, Java) to run.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### Core Architecture & Module Design
+The plugin MUST follow a single-process architecture where all logic executes asynchronously within the plugin's process. Codebase MUST be organized into clearly defined, single-responsibility modules: services/api-service.ts for external API requests using Obsidian's built-in request API; services/ai-logic-service.ts for orchestrating core AI workflows; services/cache-service.ts for data persistence using a single JSON file; services/link-injector-service.ts for safely inserting links in Markdown files; and ui/ directory for user interface components.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### Data Processing & State Principles
+Each note MUST have a unique identifier (UUID) maintained in front-matter as the stable key for all internal data associations. The plugin MUST implement content hash-based change detection to enable efficient incremental updates. Data persistence MUST use JSON files exclusively; binary databases (e.g., SQLite) are PROHIBITED. All time-intensive operations MUST be asynchronous (async/await) to preserve Obsidian UI responsiveness.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### User Experience
+The plugin MUST provide a comprehensive settings panel allowing users to configure all necessary parameters including API keys, model names, and thresholds. For long-running tasks, the plugin MUST provide a non-blocking progress dialog that clearly displays current progress and offers a cancellation option.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### Code Quality Standards
+All code MUST be written in strict TypeScript with type checking enabled. Codebase MUST follow the prescribed modular design with high cohesion and low coupling. All public functions, classes, and complex algorithms MUST have clear JSDoc comments.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## Additional Constraints
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+The plugin MUST maintain compatibility with Obsidian's plugin ecosystem and conform to Obsidian's security model. All network requests MUST use Obsidian's built-in request API and MUST NOT bypass security restrictions. The plugin MUST handle errors gracefully and provide meaningful error messages to users.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## Development Workflow
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+All new features MUST include appropriate unit and integration tests. Code reviews MUST verify compliance with all constitution principles. Breaking changes to the API or data format MUST include migration plans. Development tools and processes MUST be documented for new contributors.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other development practices. Amendments to this constitution MUST be documented with clear rationale and approval from project maintainers. All pull requests and code reviews MUST verify compliance with these principles. Any complexity introduced MUST be justified by clear functional or technical requirements.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-01-01 | **Last Amended**: 2025-10-25

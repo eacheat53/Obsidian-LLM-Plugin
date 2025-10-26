@@ -1,0 +1,10 @@
+{
+  "id": "Obsidian LLM Plugin",
+  "name": "Obsidian LLM Plugin",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "AI-powered note linking and tagging using Jina embeddings and LLMs. Automatically analyzes semantic similarity and inserts intelligent link suggestions.",
+  "author": "eacheat53",
+  "authorUrl": "https://github.com/eacheat53/Obsidian-LLM-Plugin.git",
+  "isDesktopOnly": false
+}
