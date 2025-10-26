@@ -9,7 +9,6 @@ import ObsidianLLMPlugin from '../main';
 import { DEFAULT_SCORING_PROMPT, DEFAULT_TAGGING_PROMPT, DEFAULT_SETTINGS } from '../plugin-settings';
 import { LLMProvider } from '../types/api-types';
 import { t, Translation } from '../i18n/translations';
-import { ConfirmationModal } from './confirmation-modal';
 
 /**
  * 设置选项卡类
@@ -695,37 +694,6 @@ export class SettingsTab extends PluginSettingTab {
         })
       );
 
-    // View Logs button
-    new Setting(containerEl)
-      .setName(this.tr.settings.viewLogs.name)
-      .setDesc(this.tr.settings.viewLogs.desc)
-      .addButton(button => button
-        .setButtonText(this.tr.buttons.viewLogs)
-        .onClick(async () => {
-          try {
-            const logDir = `${this.plugin.manifest.dir}/logs`;
-            const logFiles = await this.app.vault.adapter.list(logDir);
-
-            if (logFiles.files.length === 0) {
-              new Notice('No log files found.');
-              return;
-            }
-
-            // Sort files by name to get the latest one (assuming YYYY-MM-DD format)
-            logFiles.files.sort((a, b) => b.localeCompare(a));
-            const latestLog = logFiles.files[0];
-
-            // @ts-ignore - showInFolder is not in the public API but it exists
-            this.app.showInFolder(latestLog);
-            new Notice(this.tr.notices.viewLogsSuccess);
-          } catch (error) {
-            const err = error as Error;
-            new Notice(`${this.tr.notices.viewLogsFailed}: ${err.message}`);
-            console.error('[Settings] Failed to open logs folder:', error);
-          }
-        })
-      );
-
     // 清除缓存按钮
     new Setting(containerEl)
       .setName(this.tr.settings.clearCache.name)
@@ -734,24 +702,15 @@ export class SettingsTab extends PluginSettingTab {
         .setButtonText(this.tr.buttons.clearCache)
         .setWarning()
         .onClick(async () => {
-          new ConfirmationModal(
-            this.app,
-            this.tr.notices.clearCacheConfirmation.title,
-            this.tr.notices.clearCacheConfirmation.message,
-            this.tr.buttons.clearCache,
-            this.tr.buttons.confirm,
-            async () => {
-              try {
-                const cacheService = this.plugin.getCacheService();
-                await cacheService.clearCache();
-                new Notice(this.tr.notices.cacheClearSuccess);
-              } catch (error) {
-                const err = error as Error;
-                new Notice(`${this.tr.notices.cacheClearFailed}: ${err.message}`);
-                console.error('[Settings] 清除缓存失败:', error);
-              }
-            }
-          ).open();
+          try {
+            const cacheService = this.plugin.getCacheService();
+            await cacheService.clearCache();
+            new Notice(this.tr.notices.cacheClearSuccess);
+          } catch (error) {
+            const err = error as Error;
+            new Notice(`${this.tr.notices.cacheClearFailed}: ${err.message}`);
+            console.error('[Settings] 清除缓存失败:', error);
+          }
         })
       );
 

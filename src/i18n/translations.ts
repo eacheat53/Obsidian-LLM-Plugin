@@ -56,7 +56,6 @@ export interface Translation {
     showStatistics: { name: string; desc: string };
     cancelOperation: { name: string; desc: string };
     restoreDefaults: { name: string; desc: string };
-    viewLogs: { name: string; desc: string };
   };
   buttons: {
     restoreDefault: string;
@@ -64,8 +63,6 @@ export interface Translation {
     showStatistics: string;
     cancelOperation: string;
     restoreDefaults: string;
-    viewLogs: string;
-    confirm: string;
   };
   notices: {
     cacheClearSuccess: string;
@@ -76,12 +73,6 @@ export interface Translation {
     cancelFailed: string;
     restoreDefaultsSuccess: string;
     restoreDefaultsFailed: string;
-    viewLogsSuccess: string;
-    viewLogsFailed: string;
-    clearCacheConfirmation: {
-      title: string;
-      message: string;
-    };
 
     // 运行时提示
     starting: string;
@@ -268,10 +259,6 @@ export const translations: Record<Language, Translation> = {
         name: 'Restore Default Settings',
         desc: 'Reset all settings to their default values (API keys will be preserved)',
       },
-      viewLogs: {
-        name: 'View Logs',
-        desc: 'Open the folder containing the error log files',
-      },
     },
     buttons: {
       restoreDefault: 'Restore Default',
@@ -279,8 +266,6 @@ export const translations: Record<Language, Translation> = {
       showStatistics: 'Show Statistics',
       cancelOperation: 'Cancel Operation',
       restoreDefaults: 'Restore All Defaults',
-      viewLogs: 'View Logs',
-      confirm: 'Confirm',
     },
     notices: {
       cacheClearSuccess: '✅ Cache cleared successfully',
@@ -291,12 +276,6 @@ export const translations: Record<Language, Translation> = {
       cancelFailed: '❌ Failed to cancel operation',
       restoreDefaultsSuccess: '✅ All settings restored to defaults',
       restoreDefaultsFailed: '❌ Failed to restore defaults',
-      viewLogsSuccess: '✅ Opened log folder',
-      viewLogsFailed: '❌ Failed to open log folder',
-      clearCacheConfirmation: {
-        title: 'Confirm Clear Cache',
-        message: 'This is a destructive action and cannot be undone. To confirm, please type "Clear Cache" below.',
-      },
 
       // Runtime notices
       starting: 'Starting process...',
@@ -481,10 +460,6 @@ export const translations: Record<Language, Translation> = {
         name: '恢复默认设置',
         desc: '将所有设置重置为默认值（API 密钥将被保留）',
       },
-      viewLogs: {
-        name: '查看日志',
-        desc: '打开包含错误日志文件的文件夹',
-      },
     },
     buttons: {
       restoreDefault: '恢复默认',
@@ -492,8 +467,6 @@ export const translations: Record<Language, Translation> = {
       showStatistics: '显示统计信息',
       cancelOperation: '取消操作',
       restoreDefaults: '恢复所有默认设置',
-      viewLogs: '查看日志',
-      confirm: '确认',
     },
     notices: {
       cacheClearSuccess: '✅ 缓存清除成功',
@@ -504,12 +477,6 @@ export const translations: Record<Language, Translation> = {
       cancelFailed: '❌ 取消操作失败',
       restoreDefaultsSuccess: '✅ 所有设置已恢复为默认值',
       restoreDefaultsFailed: '❌ 恢复默认设置失败',
-      viewLogsSuccess: '✅ 已打开日志文件夹',
-      viewLogsFailed: '❌ 打开日志文件夹失败',
-      clearCacheConfirmation: {
-        title: '确认清除缓存',
-        message: '这是一个破坏性操作，无法撤销。要确认，请在下方输入“清除缓存”。',
-      },
 
       // 运行时提示
       starting: '开始处理...',

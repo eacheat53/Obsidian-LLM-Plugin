@@ -1,6 +1,6 @@
 {
   "name": "Obsidian LLM Plugin",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI services to automatically analyze notes and insert intelligent link suggestions",
   "main": "main.js",
   "scripts": {
