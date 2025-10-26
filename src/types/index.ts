@@ -1,126 +1,129 @@
 /**
- * Core type definitions for Obsidian AI Linker Plugin
+ * Obsidian AI Linker 插件的核心类型定义
  */
 
 /**
- * Unique identifier for a note (UUID v4 format)
+ * 笔记的唯一标识符（UUID v4 格式）
  */
 export type NoteId = string;
 
 /**
- * SHA-256 hash in lowercase hex format
+ * SHA-256 hash，小写十六进制格式
  */
 export type ContentHash = string;
 
 /**
- * Unix timestamp in milliseconds
+ * Unix 时间戳（毫秒）
  */
 export type UnixTimestamp = number;
 
 /**
- * Cosine similarity score (0.0 to 1.0)
+ * 余弦相似度分数（0.0 到 1.0）
  */
 export type SimilarityScore = number;
 
 /**
- * AI relevance score (0 to 10)
+ * AI 相关性分数（0 到 10）
  */
 export type AIScore = number;
 
 /**
- * Metadata for a single note stored in the cache
+ * 存储在缓存中的单个笔记的元数据
  */
 export interface NoteMetadata {
-  /** Unique identifier for this note */
+  /** 此笔记的唯一标识符 */
   note_id: NoteId;
 
-  /** Relative path from vault root (e.g., "folder/note.md") */
+  /** 从 vault 根目录的相对路径（例如，“folder/note.md”） */
   file_path: string;
 
-  /** SHA-256 hash of main content (before HASH_BOUNDARY marker) */
+  /** 主要内容的 SHA-256 hash（在 HASH_BOUNDARY 标记之前） */
   content_hash: ContentHash;
 
-  /** When this note was last processed (Unix timestamp in ms) */
+  /** 此笔记上次处理的时间（Unix 时间戳，毫秒） */
   last_processed: UnixTimestamp;
 
-  /** AI-generated tags merged with user tags */
+  /** AI 生成的标签与用户标签合并 */
   tags: string[];
 
-  /** Whether note has valid YAML front-matter */
+  /** AI 上次生成标签的时间（Unix 时间戳，毫秒） */
+  tags_generated_at?: UnixTimestamp;
+
+  /** 笔记是否具有有效的 YAML front-matter */
   has_frontmatter: boolean;
 
-  /** Whether note contains <!-- HASH_BOUNDARY --> marker */
+  /** 笔记是否包含 <!-- HASH_BOUNDARY --> 标记 */
   has_hash_boundary: boolean;
 
-  /** Whether note has <!-- LINKS_START/END --> block */
+  /** 笔记是否具有 <!-- LINKS_START/END --> 块 */
   has_links_section: boolean;
 }
 
 /**
- * Similarity and AI scores for a pair of notes
+ * 一对笔记的相似度和 AI 分数
  */
 export interface NotePairScore {
-  /** First note UUID (lexicographically smaller) */
+  /** 第一个笔记的 UUID（字典序较小） */
   note_id_1: NoteId;
 
-  /** Second note UUID (lexicographically larger) */
+  /** 第二个笔记的 UUID（字典序较大） */
   note_id_2: NoteId;
 
-  /** Cosine similarity score (0.0 to 1.0) */
+  /** 余弦相似度分数（0.0 到 1.0） */
   similarity_score: SimilarityScore;
 
-  /** LLM relevance score (0 to 10) */
+  /** LLM 相关性分数（0 到 10） */
   ai_score: AIScore;
 
-  /** When AI scoring was performed (Unix timestamp in ms) */
+  /** 执行 AI 评分的时间（Unix 时间戳，毫秒） */
   last_scored: UnixTimestamp;
 }
 
 /**
- * Vector embedding for a note
+ * 笔记的向量嵌入
  */
 export interface EmbeddingVector {
-  /** Note identifier matching MasterIndex */
+  /** 与 MasterIndex 匹配的笔记标识符 */
   note_id: NoteId;
 
-  /** Vector embedding (typically 768 or 1024 floats) */
+  /** 向量嵌入（通常为 768 或 1024 个浮点数） */
   embedding: number[];
 
-  /** Jina model used (e.g., 'jina-embeddings-v2-base-en') */
+  /** 使用的 Jina 模型（例如，'jina-embeddings-v2-base-en'） */
   model_name: string;
 
-  /** When the embedding was generated (Unix timestamp in ms) */
+  /** 生成嵌入的时间（Unix 时间戳，毫秒） */
   created_at: UnixTimestamp;
 
-  /** First 200 chars of content for debugging */
+  /** 用于调试的前 200 个字符的内容预览 */
   content_preview: string;
 }
 
 /**
- * Note processing lifecycle states
+ * 笔记处理生命周期状态
  */
 export enum NoteProcessingState {
-  /** Note discovered but not yet processed */
+  /** 已发现但尚未处理的笔记 */
   DISCOVERED = 'discovered',
 
-  /** UUID and hash calculated */
+  /** 已计算 UUID 和 hash */
   INDEXED = 'indexed',
 
-  /** Embedding generated */
+  /** 已生成嵌入 */
   EMBEDDED = 'embedded',
 
-  /** Similarity scores calculated */
+  /** 已计算相似度分数 */
   SCORED = 'scored',
 
-  /** Links inserted */
+  /** 已插入链接 */
   LINKED = 'linked',
 
-  /** Processing failed */
+  /** 处理失败 */
   FAILED = 'failed'
 }
 
 /**
- * Task execution status
+ * 任务执行状态
  */
 export enum TaskStatus {
   IDLE = 'idle',
@@ -132,30 +135,30 @@ export enum TaskStatus {
 }
 
 /**
- * Background task information
+ * 后台任务信息
  */
 export interface TaskInfo {
-  /** Unique task identifier */
+  /** 唯一的任务标识符 */
   task_id: string;
 
-  /** Task name for display */
+  /** 用于显示的任务名称 */
   task_name: string;
 
-  /** Current status */
+  /** 当前状态 */
   status: TaskStatus;
 
-  /** Progress percentage (0-100) */
+  /** 进度百分比（0-100） */
   progress: number;
 
-  /** Current step description */
+  /** 当前步骤描述 */
   current_step: string;
 
-  /** When task started */
+  /** 任务开始时间 */
   started_at: UnixTimestamp;
 
-  /** When task completed/failed */
+  /** 任务完成/失败时间 */
   completed_at?: UnixTimestamp;
 
-  /** Error message if failed */
+  /** 如果失败，则为错误消息 */
   error_message?: string;
 }

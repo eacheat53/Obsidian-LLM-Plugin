@@ -1,5 +1,5 @@
 /**
- * Note processing service for scanning vault, extracting content, and managing UUIDs
+ * 用于扫描 vault、提取内容和管理 UUID 的笔记处理服务
  */
 
 import { App, TFile, Notice } from 'obsidian';
@@ -10,7 +10,7 @@ import { calculateContentHash } from '../utils/hash-utils';
 import { parseFrontMatter, updateFrontMatter, ensureNoteId, extractMainContent } from '../utils/frontmatter-parser';
 
 /**
- * Service for note scanning and content processing
+ * 用于笔记扫描和内容处理的服务
  */
 export class NoteProcessorService {
   private app: App;
@@ -22,23 +22,23 @@ export class NoteProcessorService {
   }
 
   /**
-   * Scan vault for markdown files
-   * Respects excluded folders and file patterns
+   * 扫描 vault 中的 markdown 文件
+   * 遵守排除的文件夹和文件模式
    *
-   * @param scanPath - Path to scan (e.g., "/" for entire vault)
-   * @returns Array of TFile objects for markdown files
+   * @param scanPath - 要扫描的路径（例如，“/”表示整个 vault）
+   * @returns markdown 文件的 TFile 对象数组
    */
   async scanVault(scanPath: string = '/'): Promise<TFile[]> {
     const allFiles = this.app.vault.getMarkdownFiles();
 
-    // Filter by scan path and exclusions
+    // 按扫描路径和排除项筛选
     const filteredFiles = allFiles.filter(file => {
-      // Check if file is within scan path
+      // 检查文件是否在扫描路径内
       if (scanPath !== '/' && !file.path.startsWith(scanPath.replace(/^\//, ''))) {
         return false;
       }
 
-      // Check exclusions
+      // 检查排除项
       if (this.shouldExcludeFile(file)) {
         return false;
       }
@@ -47,18 +47,18 @@ export class NoteProcessorService {
     });
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[Note Processor] Scanned ${filteredFiles.length} files from ${allFiles.length} total`);
+      console.log(`[Note Processor] 从 ${allFiles.length} 个总文件中扫描了 ${filteredFiles.length} 个文件`);
     }
 
     return filteredFiles;
   }
 
   /**
-   * Extract main content from a note (before HASH_BOUNDARY marker)
-   * This is the content that gets hashed for change detection
+   * 从笔记中提取主要内容（在 HASH_BOUNDARY 标记之前）
+   * 这是为变更检测而进行 hash 的内容
    *
-   * @param file - Note file to process
-   * @returns Main content string
+   * @param file - 要处理的笔记文件
+   * @returns 主要内容字符串
    */
   async extractMainContent(file: TFile): Promise<string> {
     const content = await this.app.vault.read(file);
@@ -66,11 +66,11 @@ export class NoteProcessorService {
   }
 
   /**
-   * Ensure a note has a unique UUID in its front-matter
-   * Generates and writes UUID if missing
+   * 确保笔记在其 front-matter 中具有唯一的 UUID
+   * 如果缺少，则生成并写入 UUID
    *
-   * @param file - Note file to process
-   * @returns Note ID (existing or newly generated)
+   * @param file - 要处理的笔记文件
+   * @returns 笔记 ID（现有的或新生成的）
    */
   async ensureNoteHasId(file: TFile): Promise<NoteId> {
     const content = await this.app.vault.read(file);
@@ -79,7 +79,7 @@ export class NoteProcessorService {
     if (wasAdded) {
       await this.app.vault.modify(file, newContent);
       if (this.settings.enable_debug_logging) {
-        console.log(`[Note Processor] Added UUID to ${file.path}: ${noteId}`);
+        console.log(`[Note Processor] 已将 UUID 添加到 ${file.path}: ${noteId}`);
       }
     }
 
@@ -87,11 +87,11 @@ export class NoteProcessorService {
   }
 
   /**
-   * Calculate content hash for a note
-   * Uses SHA-256 of main content (before HASH_BOUNDARY)
+   * 计算笔记的内容 hash
+   * 使用主要内容（HASH_BOUNDARY 之前）的 SHA-256
    *
-   * @param file - Note file to hash
-   * @returns SHA-256 hash string
+   * @param file - 要进行 hash 的笔记文件
+   * @returns SHA-256 hash 字符串
    */
   async calculateContentHash(file: TFile): Promise<ContentHash> {
     const mainContent = await this.extractMainContent(file);
@@ -99,12 +99,12 @@ export class NoteProcessorService {
   }
 
   /**
-   * Add HASH_BOUNDARY marker to notes that don't have it
-   * Inserts "<!-- HASH_BOUNDARY -->" at the END of the file
-   * This separates user content (above marker) from plugin-generated content (below marker)
+   * 将 HASH_BOUNDARY 标记添加到没有它的笔记中
+   * 在文件末尾插入“<!-- HASH_BOUNDARY -->”
+   * 这将用户内容（标记上方）与插件生成的内容（标记下方）分开
    *
-   * @param files - Array of note files to process
-   * @returns Number of files modified
+   * @param files - 要处理的笔记文件数组
+   * @returns 修改的文件数
    */
   async addHashBoundaryToNotes(files: TFile[]): Promise<number> {
     let modifiedCount = 0;
@@ -112,12 +112,12 @@ export class NoteProcessorService {
     for (const file of files) {
       const content = await this.app.vault.read(file);
 
-      // Check if marker already exists
+      // 检查标记是否已存在
       if (content.includes('<!-- HASH_BOUNDARY -->')) {
         continue;
       }
 
-      // Add marker at the END of the file
+      // 在文件末尾添加标记
       const needsNewline = content.length > 0 && !content.endsWith('\n');
       const newContent = content + (needsNewline ? '\n\n' : '\n') + '<!-- HASH_BOUNDARY -->\n';
 
@@ -125,7 +125,7 @@ export class NoteProcessorService {
       modifiedCount++;
 
       if (this.settings.enable_debug_logging) {
-        console.log(`[Note Processor] Added HASH_BOUNDARY to end of ${file.path}`);
+        console.log(`[Note Processor] 已将 HASH_BOUNDARY 添加到 ${file.path} 的末尾`);
       }
     }
 
@@ -133,52 +133,52 @@ export class NoteProcessorService {
   }
 
   /**
-   * Add UUID to current active note's front-matter
-   * Used by "Generate Unique ID for Current Note" menu item
+   * 将 UUID 添加到当前活动笔记的 front-matter
+   * 由“为当前笔记生成唯一 ID”菜单项使用
    *
-   * @returns Note ID (existing or newly generated)
+   * @returns 笔记 ID（现有的或新生成的）
    */
   async addUuidToCurrentNote(): Promise<NoteId> {
     const activeFile = this.app.workspace.getActiveFile();
 
     if (!activeFile) {
-      throw new Error('No active file');
+      throw new Error('没有活动文件');
     }
 
     if (activeFile.extension !== 'md') {
-      throw new Error('Active file is not a markdown file');
+      throw new Error('活动文件不是 markdown 文件');
     }
 
     return await this.ensureNoteHasId(activeFile);
   }
 
   /**
-   * Check if a file should be excluded based on settings
+   * 根据设置检查是否应排除文件
    *
-   * @param file - File to check
-   * @returns True if file should be excluded
+   * @param file - 要检查的文件
+   * @returns 如果应排除文件，则为 True
    */
   private shouldExcludeFile(file: TFile): boolean {
-    // Parse excluded folders
+    // 解析排除的文件夹
     const excludedFolders = this.settings.excluded_folders
       .split(',')
       .map(f => f.trim())
       .filter(f => f.length > 0);
 
-    // Parse excluded patterns
+    // 解析排除的模式
     const excludedPatterns = this.settings.excluded_patterns
       .split(',')
       .map(p => p.trim())
       .filter(p => p.length > 0);
 
-    // Check if file is in excluded folder
+    // 检查文件是否在排除的文件夹中
     for (const folder of excludedFolders) {
       if (file.path.startsWith(folder.replace(/^\//, ''))) {
         return true;
       }
     }
 
-    // Check if file matches excluded pattern
+    // 检查文件是否匹配排除的模式
     for (const pattern of excludedPatterns) {
       const regex = new RegExp(pattern.replace(/\*/g, '.*'));
       if (regex.test(file.path)) {

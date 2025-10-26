@@ -1,6 +1,6 @@
 /**
- * i18n translations for UI
- * Supports English and Chinese
+ * UI 的 i18n 翻译
+ * 支持英文和中文
  */
 
 import { Language } from '../plugin-settings';
@@ -70,6 +70,20 @@ export interface Translation {
     cancelFailed: string;
     restoreDefaultsSuccess: string;
     restoreDefaultsFailed: string;
+
+    // 运行时提示
+    starting: string;
+    scanning: string;
+    embeddingDone: string;
+    scoringPairs: string;
+    linkCalibrated: string;
+    taggingDone: string;
+    finished: string;
+
+    // 进度提示（带百分比/进度条）
+    progressEmbedding: string; // e.g. Embedding {percent} {bar}
+    progressScoring: string;   // e.g. Scoring {percent} {bar}
+    progressTagging: string;   // e.g. Tagging {percent} {bar}
   };
   placeholders: {
     jinaApiKey: string;
@@ -246,6 +260,20 @@ export const translations: Record<Language, Translation> = {
       cancelFailed: '❌ Failed to cancel operation',
       restoreDefaultsSuccess: '✅ All settings restored to defaults',
       restoreDefaultsFailed: '❌ Failed to restore defaults',
+
+      // Runtime notices
+      starting: 'Starting process...',
+      scanning: 'Scanning vault for notes...',
+      embeddingDone: 'Embeddings generated',
+      scoringPairs: 'Scoring note pairs...',
+      linkCalibrated: 'Links inserted',
+      taggingDone: 'Tags generated',
+      finished: 'Process completed',
+
+      // Progress notices (with percent/bar)
+      progressEmbedding: 'Embedding {percent} {bar}',
+      progressScoring: 'Scoring {percent} {bar}',
+      progressTagging: 'Tagging {percent} {bar}',
     },
     placeholders: {
       jinaApiKey: 'Enter your API key',
@@ -420,6 +448,20 @@ export const translations: Record<Language, Translation> = {
       cancelFailed: '❌ 取消操作失败',
       restoreDefaultsSuccess: '✅ 所有设置已恢复为默认值',
       restoreDefaultsFailed: '❌ 恢复默认设置失败',
+
+      // 运行时提示
+      starting: '开始处理...',
+      scanning: '正在扫描库中的笔记...',
+      embeddingDone: '嵌入已生成',
+      scoringPairs: '正在评分笔记对...',
+      linkCalibrated: '链接已插入',
+      taggingDone: '标签已生成',
+      finished: '处理完成',
+
+      // 进度提示（带百分比/进度条）
+      progressEmbedding: '嵌入 {percent} {bar}',
+      progressScoring: '评分 {percent} {bar}',
+      progressTagging: '标签 {percent} {bar}',
     },
     placeholders: {
       jinaApiKey: '请输入您的 API 密钥',
@@ -445,7 +487,7 @@ export const translations: Record<Language, Translation> = {
 };
 
 /**
- * Get translation for a specific key
+ * 获取特定键的翻译
  */
 export function t(lang: Language): Translation {
   return translations[lang];

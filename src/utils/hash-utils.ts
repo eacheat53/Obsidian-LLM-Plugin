@@ -1,30 +1,30 @@
 /**
- * SHA-256 content hashing utilities for incremental updates
+ * 用于增量更新的 SHA-256 内容 hash 实用程序
  */
 
 import { ContentHash } from '../types/index';
 
 /**
- * Calculate SHA-256 hash of content using Web Crypto API
- * Used for detecting content changes in notes
+ * 使用 Web Crypto API 计算内容的 SHA-256 hash
+ * 用于检测笔记中的内容更改
  *
- * @param content - The text content to hash
- * @returns SHA-256 hash in lowercase hex format (64 characters)
+ * @param content - 要进行 hash 的文本内容
+ * @returns 小写十六进制格式的 SHA-256 hash（64 个字符）
  *
  * @example
  * const hash = await calculateContentHash("Hello, world!");
- * // Returns: "315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3"
+ * // 返回: "315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3"
  */
 export async function calculateContentHash(content: string): Promise<ContentHash> {
-  // Convert string to Uint8Array
+  // 将字符串转换为 Uint8Array
   const encoder = new TextEncoder();
   const data = encoder.encode(content);
 
-  // Calculate SHA-256 hash using Web Crypto API
-  // This is built-in and much faster than JavaScript implementations
+  // 使用 Web Crypto API 计算 SHA-256 hash
+  // 这是内置的，比 JavaScript 实现快得多
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 
-  // Convert ArrayBuffer to hex string
+  // 将 ArrayBuffer 转换为十六进制字符串
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
@@ -32,10 +32,10 @@ export async function calculateContentHash(content: string): Promise<ContentHash
 }
 
 /**
- * Validate if a string is a valid SHA-256 hash
+ * 验证字符串是否为有效的 SHA-256 hash
  *
- * @param hash - String to validate
- * @returns True if the string is a valid SHA-256 hash format (64 hex chars)
+ * @param hash - 要验证的字符串
+ * @returns 如果字符串是有效的 SHA-256 hash 格式（64 个十六进制字符），则为 True
  *
  * @example
  * isValidHash("315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3"); // true
@@ -47,11 +47,11 @@ export function isValidHash(hash: string): boolean {
 }
 
 /**
- * Compare two hashes for equality
+ * 比较两个 hash 是否相等
  *
- * @param hash1 - First hash
- * @param hash2 - Second hash
- * @returns True if hashes are equal
+ * @param hash1 - 第一个 hash
+ * @param hash2 - 第二个 hash
+ * @returns 如果 hash 相等则为 True
  */
 export function hashesEqual(hash1: ContentHash, hash2: ContentHash): boolean {
   return hash1 === hash2;

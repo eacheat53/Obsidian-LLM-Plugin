@@ -1,6 +1,6 @@
 /**
- * Cache service for managing master index and sharded embeddings
- * Implements JSON-based persistence with atomic writes
+ * 用于管理主索引和分片嵌入的缓存服务
+ * 实现基于 JSON 的持久化和原子写入
  */
 
 import { App, TFile } from 'obsidian';
@@ -16,7 +16,7 @@ import {
 } from '../types/cache-types';
 
 /**
- * Service for managing cache data (master index + sharded embeddings)
+ * 用于管理缓存数据（主索引 + 分片嵌入）的服务
  */
 export class CacheService {
   private app: App;
@@ -25,8 +25,8 @@ export class CacheService {
   private cacheVersion = '1.0.0';
 
   /**
-   * In-memory index for fast score lookup
-   * Maps note_id -> (related_note_id -> NotePairScore)
+   * 用于快速分数查找的内存索引
+   * 映射 note_id -> (related_note_id -> NotePairScore)
    */
   private scoreIndex: Map<NoteId, Map<NoteId, NotePairScore>> = new Map();
 
@@ -36,7 +36,7 @@ export class CacheService {
   }
 
   /**
-   * Get cache directory paths
+   * 获取缓存目录路径
    */
   private getPaths(): CachePaths {
     const cache_dir = `${this.basePath}/.obsidian/plugins/obsidian-llm-plugin/cache`;
@@ -48,8 +48,8 @@ export class CacheService {
   }
 
   /**
-   * Load the master index from disk
-   * Creates a new index if it doesn't exist
+   * 从磁盘加载主索引
+   * 如果索引不存在则创建一个新索引
    */
   async loadMasterIndex(options: CacheLoadOptions = {}): Promise<CacheLoadResult> {
     const paths = this.getPaths();
@@ -60,19 +60,19 @@ export class CacheService {
     } = options;
 
     try {
-      // Check if index file exists
+      // 检查索引文件是否存在
       const indexExists = await this.fileExists(paths.index_file);
 
       if (!indexExists) {
         if (create_if_missing) {
-          // Create new empty index
+          // 创建新的空索引
           const newIndex = this.createEmptyIndex();
           this.masterIndex = newIndex;
 
-          // Ensure cache directories exist
+          // 确保缓存目录存在
           await this.ensureCacheDirectories();
 
-          // Build empty score index
+          // 构建空的分数索引
           this.buildScoreIndex();
 
           return {
@@ -84,31 +84,31 @@ export class CacheService {
         } else {
           return {
             success: false,
-            error: 'Index file not found',
+            error: '索引文件未找到',
             created_new: false,
             migrated: false,
           };
         }
       }
 
-      // Read and parse index file
+      // 读取并解析索引文件
       const content = await this.readFile(paths.index_file);
       const index = JSON.parse(content) as MasterIndex;
 
-      // Validate schema version
+      // 验证模式版本
       if (validate_schema && index.version !== this.cacheVersion) {
-        console.warn(`[Cache Service] Schema version mismatch: ${index.version} !== ${this.cacheVersion}`);
-        // Could implement migration here in the future
+        console.warn(`[Cache Service] 模式版本不匹配: ${index.version} !== ${this.cacheVersion}`);
+        // 将来可以在此处实现迁移
       }
 
-      // Detect orphaned notes if requested
+      // 如果需要，检测孤立笔记
       if (detect_orphans) {
         await this.updateOrphanedStats(index);
       }
 
       this.masterIndex = index;
 
-      // Build in-memory score index for fast lookups
+      // 构建内存中的分数索引以进行快速查找
       this.buildScoreIndex();
 
       return {
@@ -118,7 +118,7 @@ export class CacheService {
         migrated: false,
       };
     } catch (error) {
-      console.error('[Cache Service] Failed to load master index:', error);
+      console.error('[Cache Service] 加载主索引失败:', error);
       return {
         success: false,
         error: (error as Error).message,
@@ -129,8 +129,8 @@ export class CacheService {
   }
 
   /**
-   * Save the master index to disk
-   * Uses atomic writes (temp file + rename) for crash safety
+   * 将主索引保存到磁盘
+   * 使用原子写入（临时文件 + 重命名）以确保崩溃安全
    */
   async saveMasterIndex(
     index: MasterIndex,
@@ -144,42 +144,42 @@ export class CacheService {
     } = options;
 
     try {
-      // Ensure cache directories exist
+      // 确保缓存目录存在
       await this.ensureCacheDirectories();
 
-      // Update last_updated timestamp
+      // 更新 last_updated 时间戳
       index.last_updated = Date.now();
 
-      // Update statistics if requested
+      // 如果需要，更新统计信息
       if (update_stats) {
         index.stats = this.calculateStatistics(index);
       }
 
-      // Serialize to JSON
+      // 序列化为 JSON
       const content = pretty_print
         ? JSON.stringify(index, null, 2)
         : JSON.stringify(index);
 
       if (atomic) {
-        // Atomic write: write to temp file, then rename
+        // 原子写入：写入临时文件，然后重命名
         const tempFile = `${paths.index_file}.tmp`;
         await this.writeFile(tempFile, content);
         await this.renameFile(tempFile, paths.index_file);
       } else {
-        // Direct write
+        // 直接写入
         await this.writeFile(paths.index_file, content);
       }
 
       this.masterIndex = index;
     } catch (error) {
-      console.error('[Cache Service] Failed to save master index:', error);
+      console.error('[Cache Service] 保存主索引失败:', error);
       throw error;
     }
   }
 
   /**
-   * Load embedding vector for a specific note
-   * Returns from cache or indicates generation is needed
+   * 加载特定笔记的嵌入向量
+   * 从缓存返回或指示需要生成
    */
   async loadEmbedding(noteId: NoteId): Promise<EmbeddingLoadResult> {
     const paths = this.getPaths();
@@ -191,7 +191,7 @@ export class CacheService {
       if (!exists) {
         return {
           success: false,
-          error: 'Embedding not found',
+          error: '未找到嵌入',
           from_cache: false,
         };
       }
@@ -205,7 +205,7 @@ export class CacheService {
         from_cache: true,
       };
     } catch (error) {
-      console.error(`[Cache Service] Failed to load embedding for ${noteId}:`, error);
+      console.error(`[Cache Service] 加载 ${noteId} 的嵌入失败:`, error);
       return {
         success: false,
         error: (error as Error).message,
@@ -215,42 +215,42 @@ export class CacheService {
   }
 
   /**
-   * Save embedding vector for a specific note
-   * Creates sharded file: embeddings/<note_id>.json
+   * 保存特定笔记的嵌入向量
+   * 创建分片文件：embeddings/<note_id>.json
    */
   async saveEmbedding(embedding: EmbeddingVector): Promise<void> {
     const paths = this.getPaths();
     const embeddingFile = `${paths.embeddings_dir}/${embedding.note_id}.json`;
 
     try {
-      // Ensure embeddings directory exists
+      // 确保嵌入目录存在
       await this.ensureCacheDirectories();
 
-      // Serialize to JSON
+      // 序列化为 JSON
       const content = JSON.stringify(embedding);
 
-      // Write embedding file
+      // 写入嵌入文件
       await this.writeFile(embeddingFile, content);
     } catch (error) {
-      console.error(`[Cache Service] Failed to save embedding for ${embedding.note_id}:`, error);
+      console.error(`[Cache Service] 保存 ${embedding.note_id} 的嵌入失败:`, error);
       throw error;
     }
   }
 
   /**
-   * Clear all cache data (index and embeddings)
-   * Used by "Clear Cache" button in settings
+   * 清除所有缓存数据（索引和嵌入）
+   * 由设置中的“清除缓存”按钮使用
    */
   async clearCache(): Promise<void> {
     const paths = this.getPaths();
 
     try {
-      // Delete master index
+      // 删除主索引
       if (await this.fileExists(paths.index_file)) {
         await this.deleteFile(paths.index_file);
       }
 
-      // Delete all embedding files
+      // 删除所有嵌入文件
       if (await this.directoryExists(paths.embeddings_dir)) {
         const files = await this.listFiles(paths.embeddings_dir);
         for (const file of files) {
@@ -258,43 +258,43 @@ export class CacheService {
         }
       }
 
-      // Reset in-memory index
+      // 重置内存中的索引
       this.masterIndex = null;
 
-      console.log('[Cache Service] Cache cleared successfully');
+      console.log('[Cache Service] 缓存已成功清除');
     } catch (error) {
-      console.error('[Cache Service] Failed to clear cache:', error);
+      console.error('[Cache Service] 清除缓存失败:', error);
       throw error;
     }
   }
 
   /**
-   * Calculate and print cache statistics to console
-   * Used by "Show Statistics" button in settings
+   * 计算缓存统计信息并打印到控制台
+   * 由设置中的“显示统计信息”按钮使用
    */
   async showStatistics(): Promise<CacheStatistics> {
     if (!this.masterIndex) {
       const result = await this.loadMasterIndex();
       if (!result.success || !result.index) {
-        throw new Error('Failed to load cache index');
+        throw new Error('加载缓存索引失败');
       }
     }
 
     const stats = this.calculateStatistics(this.masterIndex!);
 
-    console.log('=== Jina AI Linker Cache Statistics ===');
-    console.log(`Total Notes: ${stats.total_notes}`);
-    console.log(`Total Embeddings: ${stats.total_embeddings}`);
-    console.log(`Total Scores: ${stats.total_scores}`);
-    console.log(`Orphaned Notes: ${stats.orphaned_notes}`);
+    console.log('=== Jina AI Linker 缓存统计信息 ===');
+    console.log(`总笔记数: ${stats.total_notes}`);
+    console.log(`总嵌入数: ${stats.total_embeddings}`);
+    console.log(`总分数: ${stats.total_scores}`);
+    console.log(`孤立笔记: ${stats.orphaned_notes}`);
     console.log('======================================');
 
     return stats;
   }
 
   /**
-   * Detect orphaned notes (in cache but not in vault)
-   * Updates stats.orphaned_notes field
+   * 检测孤立笔记（在缓存中但不在 vault 中）
+   * 更新 stats.orphaned_notes 字段
    */
   async detectOrphans(): Promise<number> {
     if (!this.masterIndex) {
@@ -310,15 +310,15 @@ export class CacheService {
   }
 
   /**
-   * Get current master index (cached in memory)
+   * 获取当前主索引（缓存在内存中）
    */
   getMasterIndex(): MasterIndex | null {
     return this.masterIndex;
   }
 
   /**
-   * Set master index (for in-memory updates)
-   * Rebuilds score index automatically
+   * 设置主索引（用于内存更新）
+   * 自动重建分数索引
    */
   setMasterIndex(index: MasterIndex): void {
     this.masterIndex = index;
@@ -326,11 +326,11 @@ export class CacheService {
   }
 
   // ============================================================================
-  // Private Helper Methods
+  // 私有辅助方法
   // ============================================================================
 
   /**
-   * Create an empty master index
+   * 创建一个空的主索引
    */
   private createEmptyIndex(): MasterIndex {
     return {
@@ -348,19 +348,19 @@ export class CacheService {
   }
 
   /**
-   * Calculate statistics from index
+   * 从索引计算统计信息
    */
   private calculateStatistics(index: MasterIndex): CacheStatistics {
     return {
       total_notes: Object.keys(index.notes).length,
-      total_embeddings: Object.keys(index.notes).length, // Simplified - could check actual files
+      total_embeddings: Object.keys(index.notes).length, // 简化 - 可以检查实际文件
       total_scores: Object.keys(index.scores).length,
       orphaned_notes: index.stats.orphaned_notes || 0,
     };
   }
 
   /**
-   * Update orphaned notes statistics
+   * 更新孤立笔记统计信息
    */
   private async updateOrphanedStats(index: MasterIndex): Promise<void> {
     const vaultFiles = this.app.vault.getMarkdownFiles();
@@ -378,24 +378,24 @@ export class CacheService {
   }
 
   /**
-   * Ensure cache directories exist
+   * 确保缓存目录存在
    */
   private async ensureCacheDirectories(): Promise<void> {
     const paths = this.getPaths();
 
-    // Create cache directory
+    // 创建缓存目录
     if (!(await this.directoryExists(paths.cache_dir))) {
       await this.createDirectory(paths.cache_dir);
     }
 
-    // Create embeddings directory
+    // 创建嵌入目录
     if (!(await this.directoryExists(paths.embeddings_dir))) {
       await this.createDirectory(paths.embeddings_dir);
     }
   }
 
   // ============================================================================
-  // File System Abstraction (uses Node.js fs for direct file access)
+  // 文件系统抽象（使用 Node.js fs 进行直接文件访问）
   // ============================================================================
 
   private async fileExists(path: string): Promise<boolean> {
@@ -449,15 +449,15 @@ export class CacheService {
   }
 
   // ============================================================================
-  // Score Index Management (In-Memory Optimization)
+  // 分数索引管理（内存优化）
   // ============================================================================
 
   /**
-   * Build in-memory score index from flat scores structure
-   * Enables O(1) lookup of all scores for a given note
+   * 从扁平的分数结构构建内存中的分数索引
+   * 实现对给定笔记的所有分数的 O(1) 查找
    *
-   * Storage structure (disk): { "id1:id2": score, "id3:id4": score }
-   * Index structure (memory): { id1: { id2: score }, id2: { id1: score }, id3: { id4: score }, id4: { id3: score } }
+   * 存储结构（磁盘）：{ "id1:id2": score, "id3:id4": score }
+   * 索引结构（内存）：{ id1: { id2: score }, id2: { id1: score }, id3: { id4: score }, id4: { id3: score } }
    */
   private buildScoreIndex(): void {
     this.scoreIndex.clear();
@@ -466,11 +466,11 @@ export class CacheService {
       return;
     }
 
-    // Iterate through all score pairs
+    // 遍历所有分数对
     for (const [pairKey, score] of Object.entries(this.masterIndex.scores)) {
       const [noteId1, noteId2] = pairKey.split(':') as [NoteId, NoteId];
 
-      // Add bidirectional entries to index
+      // 将双向条目添加到索引
       if (!this.scoreIndex.has(noteId1)) {
         this.scoreIndex.set(noteId1, new Map());
       }
@@ -484,11 +484,11 @@ export class CacheService {
   }
 
   /**
-   * Get all scores for a given note (O(1) lookup)
-   * Returns all note pairs where the given note is involved
+   * 获取给定笔记的所有分数（O(1) 查找）
+   * 返回涉及给定笔记的所有笔记对
    *
-   * @param noteId - Note ID to get scores for
-   * @returns Array of scores involving this note, sorted by score (descending)
+   * @param noteId - 要获取分数的笔记 ID
+   * @returns 涉及此笔记的分数数组，按分数排序（降序）
    */
   getScoresForNote(noteId: NoteId): NotePairScore[] {
     const relatedScores = this.scoreIndex.get(noteId);
@@ -497,18 +497,18 @@ export class CacheService {
       return [];
     }
 
-    // Convert Map to array and sort by AI score
+    // 将 Map 转换为数组并按 AI 分数排序
     return Array.from(relatedScores.values()).sort(
       (a, b) => b.ai_score - a.ai_score
     );
   }
 
   /**
-   * Get top N related notes for a given note
+   * 获取给定笔记的前 N 个相关笔记
    *
-   * @param noteId - Note ID to find related notes for
-   * @param limit - Maximum number of results (default: 10)
-   * @returns Array of top N related note IDs, sorted by score
+   * @param noteId - 要为其查找相关笔记的笔记 ID
+   * @param limit - 最大结果数（默认为 10）
+   * @returns 前 N 个相关笔记 ID 的数组，按分数排序
    */
   getTopRelatedNotes(noteId: NoteId, limit: number = 10): NoteId[] {
     const scores = this.getScoresForNote(noteId);

@@ -1,31 +1,31 @@
 /**
- * YAML front-matter parsing and manipulation utilities
+ * YAML front-matter 解析和操作实用程序
  */
 
 import { NoteId } from '../types/index';
 
 /**
- * Parsed front-matter data structure
+ * 解析后的 front-matter 数据结构
  */
 export interface FrontMatterData {
-  /** The parsed YAML data as key-value pairs */
+  /** 解析后的 YAML 数据，以键值对形式存在 */
   data: Record<string, unknown>;
 
-  /** Raw YAML content (between --- delimiters) */
+  /** 原始 YAML 内容（在 --- 分隔符之间） */
   raw_yaml: string;
 
-  /** Content after the front-matter */
+  /** front-matter 之后的内容 */
   body: string;
 
-  /** Whether front-matter exists */
+  /** front-matter 是否存在 */
   exists: boolean;
 }
 
 /**
- * Parse YAML front-matter from markdown content
+ * 从 markdown 内容中解析 YAML front-matter
  *
- * @param content - Full markdown file content
- * @returns Parsed front-matter data
+ * @param content - 完整的 markdown 文件内容
+ * @returns 解析后的 front-matter 数据
  *
  * @example
  * const content = "---\ntitle: My Note\ntags: [ai, knowledge]\n---\n\nContent here";
@@ -50,8 +50,8 @@ export function parseFrontMatter(content: string): FrontMatterData {
   const body = content.slice(match[0].length);
 
   try {
-    // Simple YAML parsing for key-value pairs
-    // Note: This is a basic implementation. For complex YAML, consider using a library
+    // 针对键值对的简单 YAML 解析
+    // 注意：这是一个基本的实现。对于复杂的 YAML，请考虑使用库
     const data = parseSimpleYAML(raw_yaml);
 
     return {
@@ -61,7 +61,7 @@ export function parseFrontMatter(content: string): FrontMatterData {
       exists: true,
     };
   } catch (error) {
-    console.warn('Failed to parse front-matter YAML:', error);
+    console.warn('无法解析 front-matter YAML:', error);
     return {
       data: {},
       raw_yaml,
@@ -72,11 +72,11 @@ export function parseFrontMatter(content: string): FrontMatterData {
 }
 
 /**
- * Simple YAML parser for basic key-value pairs
- * Supports: strings, numbers, booleans, arrays
+ * 用于基本键值对的简单 YAML 解析器
+ * 支持：字符串、数字、布尔值、数组
  *
- * @param yaml - YAML string to parse
- * @returns Parsed object
+ * @param yaml - 要解析的 YAML 字符串
+ * @returns 解析后的对象
  */
 function parseSimpleYAML(yaml: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -92,14 +92,14 @@ function parseSimpleYAML(yaml: string): Record<string, unknown> {
     const key = trimmed.slice(0, colonIndex).trim();
     let value: unknown = trimmed.slice(colonIndex + 1).trim();
 
-    // Parse array format: [item1, item2]
+    // 解析数组格式：[item1, item2]
     if (typeof value === 'string' && value.startsWith('[') && value.endsWith(']')) {
       value = value.slice(1, -1).split(',').map(v => v.trim());
     }
-    // Parse boolean
+    // 解析布尔值
     else if (value === 'true') value = true;
     else if (value === 'false') value = false;
-    // Parse number
+    // 解析数字
     else if (typeof value === 'string' && !isNaN(Number(value))) {
       value = Number(value);
     }
@@ -111,11 +111,11 @@ function parseSimpleYAML(yaml: string): Record<string, unknown> {
 }
 
 /**
- * Update front-matter with new data
+ * 使用新数据更新 front-matter
  *
- * @param content - Original markdown content
- * @param updates - Data to update/add to front-matter
- * @returns Updated markdown content
+ * @param content - 原始 markdown 内容
+ * @param updates - 要更新/添加到 front-matter 的数据
+ * @returns 更新后的 markdown 内容
  *
  * @example
  * const updated = updateFrontMatter(content, { note_id: "abc-123", tags: ["new-tag"] });
@@ -126,10 +126,10 @@ export function updateFrontMatter(
 ): string {
   const fm = parseFrontMatter(content);
 
-  // Merge updates into existing data
+  // 将更新合并到现有数据中
   const newData = { ...fm.data, ...updates };
 
-  // Generate new YAML
+  // 生成新的 YAML
   const yamlLines: string[] = [];
   for (const [key, value] of Object.entries(newData)) {
     if (Array.isArray(value)) {
@@ -143,21 +143,21 @@ export function updateFrontMatter(
   const newFrontMatter = `---\n${newYaml}\n---\n`;
 
   if (fm.exists) {
-    // Replace existing front-matter
+    // 替换现有的 front-matter
     return content.replace(/^---\n[\s\S]*?\n---\n/, newFrontMatter);
   } else {
-    // Add new front-matter at the beginning
+    // 在开头添加新的 front-matter
     return newFrontMatter + content;
   }
 }
 
 /**
- * Ensure a note has a unique note_id in its front-matter
- * If missing, generates and adds one
+ * 确保笔记在其 front-matter 中具有唯一的 note_id
+ * 如果缺少，则生成并添加一个
  *
- * @param content - Original markdown content
- * @param generateId - Function to generate a new note ID
- * @returns Tuple of [updated content, note_id, was_added]
+ * @param content - 原始 markdown 内容
+ * @param generateId - 用于生成新笔记 ID 的函数
+ * @returns [更新后的内容, note_id, was_added] 的元组
  *
  * @example
  * const [newContent, noteId, added] = ensureNoteId(content, () => crypto.randomUUID());
@@ -168,12 +168,12 @@ export function ensureNoteId(
 ): [string, NoteId, boolean] {
   const fm = parseFrontMatter(content);
 
-  // Check if note_id already exists
+  // 检查 note_id 是否已存在
   if (fm.data.note_id && typeof fm.data.note_id === 'string') {
     return [content, fm.data.note_id as NoteId, false];
   }
 
-  // Generate new note_id
+  // 生成新的 note_id
   const noteId = generateId();
   const updatedContent = updateFrontMatter(content, { note_id: noteId });
 
@@ -181,11 +181,11 @@ export function ensureNoteId(
 }
 
 /**
- * Get the value of a specific front-matter field
+ * 获取特定 front-matter 字段的值
  *
- * @param content - Markdown content
- * @param field - Field name to retrieve
- * @returns Field value or undefined if not found
+ * @param content - Markdown 内容
+ * @param field - 要检索的字段名称
+ * @returns 字段值，如果未找到则为 undefined
  */
 export function getFrontMatterField(content: string, field: string): unknown {
   const fm = parseFrontMatter(content);
@@ -193,17 +193,17 @@ export function getFrontMatterField(content: string, field: string): unknown {
 }
 
 /**
- * Extract main content (after front-matter, before HASH_BOUNDARY)
- * This is the content that should be hashed for change detection
+ * 提取主要内容（在 front-matter 之后，HASH_BOUNDARY 之前）
+ * 这是应该为变更检测进行 hash 的内容
  *
- * @param content - Full markdown content
- * @returns Main content for hashing
+ * @param content - 完整的 markdown 内容
+ * @returns 用于 hash 的主要内容
  */
 export function extractMainContent(content: string): string {
   const fm = parseFrontMatter(content);
   let mainContent = fm.body;
 
-  // If HASH_BOUNDARY marker exists, extract content before it
+  // 如果存在 HASH_BOUNDARY 标记，则提取其前的内容
   const boundaryIndex = mainContent.indexOf('<!-- HASH_BOUNDARY -->');
   if (boundaryIndex !== -1) {
     mainContent = mainContent.slice(0, boundaryIndex);
