@@ -22,6 +22,7 @@ export interface Translation {
     processNotes: string;
     batchTags: string;
     generateUuid: string;
+    viewFailures: string;
   };
   settings: {
     language: { name: string; desc: string };
@@ -48,6 +49,8 @@ export interface Translation {
     restoreTaggingPrompt: { name: string; desc: string };
     batchSizeScoring: { name: string; desc: string };
     batchSizeTagging: { name: string; desc: string };
+    llmScoringMaxChars: { name: string; desc: string };
+    llmTaggingMaxChars: { name: string; desc: string };
     enableDebugLogging: { name: string; desc: string };
     clearCache: { name: string; desc: string };
     showStatistics: { name: string; desc: string };
@@ -84,6 +87,10 @@ export interface Translation {
     progressEmbedding: string; // e.g. Embedding {percent} {bar}
     progressScoring: string;   // e.g. Scoring {percent} {bar}
     progressTagging: string;   // e.g. Tagging {percent} {bar}
+
+    // 失败批次提示
+    batchFailures: string;      // e.g. {count} batches failed
+    failuresRecorded: string;   // 失败已记录到日志
   };
   placeholders: {
     jinaApiKey: string;
@@ -125,6 +132,7 @@ export const translations: Record<Language, Translation> = {
       processNotes: 'Process Notes and Insert Suggested Links',
       batchTags: 'Batch Insert AI Tags',
       generateUuid: 'Generate Unique ID for Current Note',
+      viewFailures: 'View Failed Operations',
     },
     settings: {
       language: {
@@ -221,7 +229,15 @@ export const translations: Record<Language, Translation> = {
       },
       batchSizeTagging: {
         name: 'Batch Size for Tagging',
-        desc: 'Number of notes to tag per AI request (1 to 20)',
+        desc: 'Number of notes to tag per AI request (1 to 50)',
+      },
+      llmScoringMaxChars: {
+        name: 'Max Characters for Scoring',
+        desc: 'Maximum number of characters per note content sent to LLM for scoring (500 to 5000)',
+      },
+      llmTaggingMaxChars: {
+        name: 'Max Characters for Tagging',
+        desc: 'Maximum number of characters per note content sent to LLM for tag generation (500 to 5000)',
       },
       enableDebugLogging: {
         name: 'Enable Debug Logging',
@@ -274,6 +290,10 @@ export const translations: Record<Language, Translation> = {
       progressEmbedding: 'Embedding {percent} {bar}',
       progressScoring: 'Scoring {percent} {bar}',
       progressTagging: 'Tagging {percent} {bar}',
+
+      // Batch failures
+      batchFailures: '⚠️ {count} batches failed',
+      failuresRecorded: 'Failures have been logged. Click "View Failed Operations" to retry.',
     },
     placeholders: {
       jinaApiKey: 'Enter your API key',
@@ -313,6 +333,7 @@ export const translations: Record<Language, Translation> = {
       processNotes: '处理笔记并插入建议链接',
       batchTags: '批量插入 AI 标签',
       generateUuid: '为当前笔记生成唯一 ID',
+      viewFailures: '查看失败的操作',
     },
     settings: {
       language: {
@@ -409,7 +430,15 @@ export const translations: Record<Language, Translation> = {
       },
       batchSizeTagging: {
         name: '标签批处理大小',
-        desc: '每次 AI 请求标记的笔记数量（1 到 20）',
+        desc: '每次 AI 请求标记的笔记数量（1 到 50）',
+      },
+      llmScoringMaxChars: {
+        name: '评分最大字符数',
+        desc: '发送给 LLM 进行评分的每个笔记内容的最大字符数（500 到 5000）',
+      },
+      llmTaggingMaxChars: {
+        name: '标签生成最大字符数',
+        desc: '发送给 LLM 生成标签的每个笔记内容的最大字符数（500 到 5000）',
       },
       enableDebugLogging: {
         name: '启用调试日志',
@@ -462,6 +491,10 @@ export const translations: Record<Language, Translation> = {
       progressEmbedding: '嵌入 {percent} {bar}',
       progressScoring: '评分 {percent} {bar}',
       progressTagging: '标签 {percent} {bar}',
+
+      // 失败批次提示
+      batchFailures: '⚠️ {count} 个批次失败',
+      failuresRecorded: '失败已记录到日志。点击"查看失败的操作"可重试。',
     },
     placeholders: {
       jinaApiKey: '请输入您的 API 密钥',

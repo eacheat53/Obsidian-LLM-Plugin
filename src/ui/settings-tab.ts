@@ -611,7 +611,7 @@ export class SettingsTab extends PluginSettingTab {
         .setValue(String(this.plugin.settings.batch_size_tagging))
         .onChange(async (value) => {
           const num = parseInt(value);
-          if (!isNaN(num) && num >= 1 && num <= 20) {
+          if (!isNaN(num) && num >= 1 && num <= 50) {
             this.plugin.settings.batch_size_tagging = num;
             await this.plugin.saveSettings();
           }
@@ -622,8 +622,56 @@ export class SettingsTab extends PluginSettingTab {
         if (textInput) {
           textInput.type = 'number';
           textInput.min = '1';
-          textInput.max = '20';
+          textInput.max = '50';
           textInput.step = '1';
+        }
+      });
+
+    // LLM 评分最大字符数
+    new Setting(containerEl)
+      .setName(this.tr.settings.llmScoringMaxChars.name)
+      .setDesc(this.tr.settings.llmScoringMaxChars.desc)
+      .addText(text => text
+        .setValue(String(this.plugin.settings.llm_scoring_max_chars))
+        .onChange(async (value) => {
+          const num = parseInt(value);
+          if (!isNaN(num) && num >= 500 && num <= 5000) {
+            this.plugin.settings.llm_scoring_max_chars = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      )
+      .then(setting => {
+        const textInput = setting.controlEl.querySelector('input');
+        if (textInput) {
+          textInput.type = 'number';
+          textInput.min = '500';
+          textInput.max = '5000';
+          textInput.step = '100';
+        }
+      });
+
+    // LLM 标签生成最大字符数
+    new Setting(containerEl)
+      .setName(this.tr.settings.llmTaggingMaxChars.name)
+      .setDesc(this.tr.settings.llmTaggingMaxChars.desc)
+      .addText(text => text
+        .setValue(String(this.plugin.settings.llm_tagging_max_chars))
+        .onChange(async (value) => {
+          const num = parseInt(value);
+          if (!isNaN(num) && num >= 500 && num <= 5000) {
+            this.plugin.settings.llm_tagging_max_chars = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      )
+      .then(setting => {
+        const textInput = setting.controlEl.querySelector('input');
+        if (textInput) {
+          textInput.type = 'number';
+          textInput.min = '500';
+          textInput.max = '5000';
+          textInput.step = '100';
         }
       });
   }

@@ -120,8 +120,14 @@ export interface PluginSettings {
   /** 评分请求的批量大小（每个请求 1 到 50 对） */
   batch_size_scoring: number;
 
-  /** 标记请求的批量大小（每个请求 1 到 20 个笔记） */
+  /** 标记请求的批量大小（每个请求 1 到 50 个笔记） */
   batch_size_tagging: number;
+
+  /** LLM 评分时发送的每个笔记内容的最大字符数 */
+  llm_scoring_max_chars: number;
+
+  /** LLM 标签生成时发送的每个笔记内容的最大字符数 */
+  llm_tagging_max_chars: number;
 
   // ============================================================================
   // 性能和调试
@@ -311,6 +317,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   // AI 批量处理参数
   batch_size_scoring: 10,
   batch_size_tagging: 5,
+  llm_scoring_max_chars: 1000,
+  llm_tagging_max_chars: 2000,
 
   // 性能和调试
   enable_debug_logging: false,

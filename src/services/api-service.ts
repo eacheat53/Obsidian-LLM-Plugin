@@ -354,12 +354,12 @@ class GeminiAdapter implements LLMAdapter {
       note_1: {
         id: pair.note_id_1,
         title: pair.title_1,
-        content: pair.content_1.substring(0, 1000)
+        content: pair.content_1.substring(0, this.settings.llm_scoring_max_chars)
       },
       note_2: {
         id: pair.note_id_2,
         title: pair.title_2,
-        content: pair.content_2.substring(0, 1000)
+        content: pair.content_2.substring(0, this.settings.llm_scoring_max_chars)
       },
       similarity_score: parseFloat(pair.similarity_score.toFixed(3))
     }));
@@ -379,7 +379,7 @@ class GeminiAdapter implements LLMAdapter {
     request.notes.forEach((note) => {
       prompt += `笔记 ID: ${note.note_id}\n`;
       prompt += `标题: "${note.title}"\n`;
-      prompt += `内容: ${note.content.substring(0, 1000)}\n`;
+      prompt += `内容: ${note.content.substring(0, this.settings.llm_tagging_max_chars)}\n`;
       if (note.existing_tags.length > 0) {
         prompt += `现有标签: ${note.existing_tags.join(', ')}\n`;
       }
@@ -629,8 +629,8 @@ class OpenAIAdapter implements LLMAdapter {
 
     request.pairs.forEach((pair, index) => {
       prompt += `配对 ${index + 1}:\n`;
-      prompt += `笔记 A: "${pair.title_1}"\n${pair.content_1.substring(0, 500)}\n\n`;
-      prompt += `笔记 B: "${pair.title_2}"\n${pair.content_2.substring(0, 500)}\n\n`;
+      prompt += `笔记 A: "${pair.title_1}"\n${pair.content_1.substring(0, this.settings.llm_scoring_max_chars)}\n\n`;
+      prompt += `笔记 B: "${pair.title_2}"\n${pair.content_2.substring(0, this.settings.llm_scoring_max_chars)}\n\n`;
       prompt += `相似度分数: ${pair.similarity_score.toFixed(3)}\n\n`;
     });
 
@@ -647,7 +647,7 @@ class OpenAIAdapter implements LLMAdapter {
     request.notes.forEach((note) => {
       prompt += `笔记 ID: ${note.note_id}\n`;
       prompt += `标题: "${note.title}"\n`;
-      prompt += `内容: ${note.content.substring(0, 500)}\n`;
+      prompt += `内容: ${note.content.substring(0, this.settings.llm_tagging_max_chars)}\n`;
       if (note.existing_tags.length > 0) {
         prompt += `现有标签: ${note.existing_tags.join(', ')}\n`;
       }

@@ -125,3 +125,75 @@ export interface EmbeddingLoadResult {
   /** 嵌入是从缓存加载还是需要生成 */
   from_cache: boolean;
 }
+
+/**
+ * 失败操作的类型
+ */
+export type FailedOperationType = 'embedding' | 'scoring' | 'tagging';
+
+/**
+ * 失败操作记录
+ */
+export interface FailedOperation {
+  /** 唯一标识符 (timestamp + random) */
+  id: string;
+
+  /** 失败时间戳 */
+  timestamp: number;
+
+  /** 操作类型 */
+  operation_type: FailedOperationType;
+
+  /** 批次信息 */
+  batch_info: {
+    /** 批次编号 (从 1 开始) */
+    batch_number: number;
+
+    /** 总批次数 */
+    total_batches: number;
+
+    /** 批次中的项目 (note_ids 或 pair_keys) */
+    items: string[];
+  };
+
+  /** 错误信息 */
+  error: {
+    /** 错误消息 */
+    message: string;
+
+    /** 错误类型 (ConfigurationError, TransientError, etc.) */
+    type: string;
+
+    /** 错误堆栈 (可选) */
+    stack?: string;
+
+    /** HTTP 状态码 (如果适用) */
+    status?: number;
+  };
+
+  /** 已重试次数 */
+  retry_count: number;
+
+  /** 最后一次重试时间 (可选) */
+  last_retry_at?: number;
+
+  /** 是否已解决 */
+  resolved: boolean;
+}
+
+/**
+ * 失败日志文件结构
+ */
+export interface FailureLog {
+  /** 日志版本 */
+  version: string;
+
+  /** 日志创建时间 */
+  created_at: number;
+
+  /** 最后更新时间 */
+  last_updated: number;
+
+  /** 失败操作列表 */
+  operations: FailedOperation[];
+}

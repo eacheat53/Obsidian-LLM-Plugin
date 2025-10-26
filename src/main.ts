@@ -9,8 +9,10 @@ import { NoteProcessorService } from './services/note-processor';
 import { APIService } from './services/api-service';
 import { AILogicService } from './services/ai-logic-service';
 import { LinkInjectorService } from './services/link-injector-service';
+import { FailureLogService } from './services/failure-log-service';
 import { NotifierService } from './services/notifier';
 import { TaskManagerService } from './services/task-manager';
+import { ErrorLogger } from './utils/error-logger';
 import { SettingsTab } from './ui/settings-tab';
 import { SidebarMenuService } from './ui/sidebar-menu';
 import { NoteId, NotePairScore } from './types/index';
@@ -28,6 +30,8 @@ export default class ObsidianLLMPlugin extends Plugin {
   private aiLogicService!: AILogicService;
   private linkInjectorService!: LinkInjectorService;
   private taskManagerService!: TaskManagerService;
+  private failureLogService!: FailureLogService;
+  private errorLogger!: ErrorLogger;
   private notifier!: NotifierService;
   private sidebarMenuService!: SidebarMenuService;
 
@@ -72,7 +76,16 @@ export default class ObsidianLLMPlugin extends Plugin {
     this.cacheService = new CacheService(this.app, basePath);
     this.noteProcessorService = new NoteProcessorService(this.app, this.settings);
     this.apiService = new APIService(this.settings);
-    this.aiLogicService = new AILogicService(this.app, this.settings, this.apiService, this.cacheService);
+    this.failureLogService = new FailureLogService(this.app);
+    this.errorLogger = new ErrorLogger(basePath);
+    this.aiLogicService = new AILogicService(
+      this.app,
+      this.settings,
+      this.apiService,
+      this.cacheService,
+      this.failureLogService,
+      this.errorLogger
+    );
     this.linkInjectorService = new LinkInjectorService(this.app, this.settings, this.cacheService);
     this.taskManagerService = new TaskManagerService();
     this.sidebarMenuService = new SidebarMenuService(this);
@@ -352,26 +365,12 @@ export default class ObsidianLLMPlugin extends Plugin {
             // 为更改的笔记生成/更新标签并写入 YAML
             updateProgress(95, 'Generating tags for changed notes...');
             const changedList = Array.from(changedNoteIds);
-            const batchSize = this.settings.batch_size_tagging;
-            const allGeneratedTags = new Map<NoteId, string[]>();
 
-            for (let i = 0; i < changedList.length; i += batchSize) {
-              const batch = changedList.slice(i, i + batchSize);
-              try {
-                const tagsMap = await this.aiLogicService.generateTagsBatch(batch);
-                for (const [nid, tags] of tagsMap.entries()) {
-                  allGeneratedTags.set(nid, tags);
-
-                  // 更新主索引
-                  if (masterIndex.notes[nid]) {
-                    masterIndex.notes[nid].tags = tags;
-                    masterIndex.notes[nid].tags_generated_at = Date.now();
-                  }
-                }
-              } catch (err) {
-                console.error('[Main] Failed to generate tags for batch:', err);
-              }
-            }
+            // generateTagsBatch 现在内部按批次处理，并自动保存到 masterIndex
+            const allGeneratedTags = await this.aiLogicService.generateTagsBatch(
+              changedList,
+              () => this.taskManagerService.isCancellationRequested()
+            );
 
             // 将标签写入 YAML front-matter
             updateProgress(96, 'Updating YAML with tags...');
@@ -985,45 +984,18 @@ export default class ObsidianLLMPlugin extends Plugin {
         // 使用最新索引更新缓存服务
         this.cacheService.setMasterIndex(masterIndex);
 
-        // 步骤 4：分批生成标签
-        updateProgress(30, 'Generating tags in batches...');
+        // 步骤 4：生成标签（内部按批次处理并自动保存）
+        updateProgress(30, 'Generating tags...');
+
+        // generateTagsBatch 现在内部按批次处理，并自动保存到 masterIndex
+        const allGeneratedTags = await this.aiLogicService.generateTagsBatch(
+          noteIds,
+          () => this.taskManagerService.isCancellationRequested()
+        );
+
         let totalTagsGenerated = 0;
-        const batchSize = this.settings.batch_size_tagging;
-        const allGeneratedTags = new Map<NoteId, string[]>();
-
-        for (let i = 0; i < noteIds.length; i += batchSize) {
-          const batch = noteIds.slice(i, i + batchSize);
-          const batchNum = Math.floor(i / batchSize) + 1;
-          const totalBatches = Math.ceil(noteIds.length / batchSize);
-
-          updateProgress(
-            30 + ((i / noteIds.length) * 50),
-            `Generating tags batch ${batchNum}/${totalBatches} (${batch.length} notes)...`
-          );
-
-          try {
-            const tagsMap = await this.aiLogicService.generateTagsBatch(batch);
-
-            // 存储结果
-            for (const [noteId, tags] of tagsMap.entries()) {
-              allGeneratedTags.set(noteId, tags);
-              totalTagsGenerated += tags.length;
-
-              // 更新主索引
-              if (masterIndex.notes[noteId]) {
-                masterIndex.notes[noteId].tags = tags;
-                masterIndex.notes[noteId].tags_generated_at = Date.now();
-              }
-            }
-          } catch (error) {
-            console.error(`[Main] Failed to generate tags for batch ${batchNum}:`, error);
-            // 继续处理下一批
-          }
-
-          // 检查是否取消
-          if (this.taskManagerService.isCancellationRequested()) {
-            throw new Error('Task cancelled by user');
-          }
+        for (const tags of allGeneratedTags.values()) {
+          totalTagsGenerated += tags.length;
         }
 
         // 步骤 5：更新所有笔记的 front-matter

@@ -9,8 +9,10 @@ import { NoteId, NotePairScore, SimilarityScore } from '../types/index';
 import { NotePairForScoring, NoteForTagging } from '../types/api-types';
 import { APIService } from './api-service';
 import { CacheService } from './cache-service';
+import { FailureLogService } from './failure-log-service';
 import { cosineSimilarity } from '../utils/vector-math';
 import { extractMainContent } from '../utils/frontmatter-parser';
+import { ErrorLogger } from '../utils/error-logger';
 
 /**
  * 面向笔记分析的 AI 能力服务
@@ -20,17 +22,23 @@ export class AILogicService {
   private settings: PluginSettings;
   private apiService: APIService;
   private cacheService: CacheService;
+  private failureLogService: FailureLogService | null;
+  private errorLogger: ErrorLogger | null;
 
   constructor(
     app: App,
     settings: PluginSettings,
     apiService: APIService,
-    cacheService: CacheService
+    cacheService: CacheService,
+    failureLogService?: FailureLogService,
+    errorLogger?: ErrorLogger
   ) {
     this.app = app;
     this.settings = settings;
     this.apiService = apiService;
     this.cacheService = cacheService;
+    this.failureLogService = failureLogService || null;
+    this.errorLogger = errorLogger || null;
   }
 
   /**
@@ -225,69 +233,131 @@ export class AILogicService {
     // 按批次处理
     const batchSize = this.settings.batch_size_scoring;
     const scoredPairs: NotePairScore[] = [];
+    const totalBatches = Math.ceil(pairs.length / batchSize);
+    let failedBatchCount = 0;
 
     for (let i = 0; i < pairs.length; i += batchSize) {
       if (shouldCancel && shouldCancel()) {
         console.warn('[AI Logic] 评分已被取消');
         throw new Error('Task cancelled by user');
       }
+
       const batch = pairs.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
 
-      // 构建供 API 使用的配对数据
-      const pairsForScoring: NotePairForScoring[] = await Promise.all(
-        batch.map(async pair => {
-          const note1 = masterIndex.notes[pair.note_id_1];
-          const note2 = masterIndex.notes[pair.note_id_2];
+      try {
+        // 构建供 API 使用的配对数据
+        const pairsForScoring: NotePairForScoring[] = await Promise.all(
+          batch.map(async pair => {
+            const note1 = masterIndex.notes[pair.note_id_1];
+            const note2 = masterIndex.notes[pair.note_id_2];
 
-          // 获取文件对象
-          const file1 = this.app.vault.getAbstractFileByPath(note1.file_path) as TFile;
-          const file2 = this.app.vault.getAbstractFileByPath(note2.file_path) as TFile;
+            // 获取文件对象
+            const file1 = this.app.vault.getAbstractFileByPath(note1.file_path) as TFile;
+            const file2 = this.app.vault.getAbstractFileByPath(note2.file_path) as TFile;
 
-          // Get content and extract main content (YAML之后，HASH_BOUNDARY之前)
-          const fullContent1 = file1 ? await this.app.vault.read(file1) : '';
-          const fullContent2 = file2 ? await this.app.vault.read(file2) : '';
-          const mainContent1 = extractMainContent(fullContent1);
-          const mainContent2 = extractMainContent(fullContent2);
+            // Get content and extract main content (YAML之后，HASH_BOUNDARY之前)
+            const fullContent1 = file1 ? await this.app.vault.read(file1) : '';
+            const fullContent2 = file2 ? await this.app.vault.read(file2) : '';
+            const mainContent1 = extractMainContent(fullContent1);
+            const mainContent2 = extractMainContent(fullContent2);
 
-          return {
-            note_id_1: pair.note_id_1,
-            note_id_2: pair.note_id_2,
-            title_1: file1?.basename || 'Unknown',
-            title_2: file2?.basename || 'Unknown',
-            content_1: mainContent1.substring(0, 1000), // Only main content, limit for API
-            content_2: mainContent2.substring(0, 1000), // Only main content, limit for API
-            similarity_score: pair.similarity_score,
-          };
-        })
-      );
+            return {
+              note_id_1: pair.note_id_1,
+              note_id_2: pair.note_id_2,
+              title_1: file1?.basename || 'Unknown',
+              title_2: file2?.basename || 'Unknown',
+              content_1: mainContent1.substring(0, this.settings.llm_scoring_max_chars), // Only main content, limit for API
+              content_2: mainContent2.substring(0, this.settings.llm_scoring_max_chars), // Only main content, limit for API
+              similarity_score: pair.similarity_score,
+            };
+          })
+        );
 
-      // 调用 LLM API 进行打分
-      const response = await this.apiService.callLLMAPI({ pairs: pairsForScoring });
+        // 调用 LLM API 进行打分
+        const response = await this.apiService.callLLMAPI({ pairs: pairsForScoring });
 
-      // 已移除此处的人类可读日志，避免与主流程重复输出
-      if (this.settings.enable_debug_logging) {
-        try {
-          // no-op
-        } catch (e) {
-          console.warn('[AI Logic] 可读评分日志输出失败：', e);
+        // 已移除此处的人类可读日志，避免与主流程重复输出
+        if (this.settings.enable_debug_logging) {
+          try {
+            // no-op
+          } catch (e) {
+            console.warn('[AI Logic] 可读评分日志输出失败：', e);
+          }
         }
-      }
 
-      // 合并 AI 分数到配对结果中
-      for (let j = 0; j < batch.length; j++) {
-        const pair = batch[j];
-        const scoreResult = response.scores[j];
+        // 合并 AI 分数到配对结果中，并立即保存到 masterIndex
+        for (let j = 0; j < batch.length; j++) {
+          const pair = batch[j];
+          const scoreResult = response.scores[j];
 
-        scoredPairs.push({
-          ...pair,
-          ai_score: scoreResult?.score || 0,
-          last_scored: Date.now(),
-        });
-      }
+          const scoredPair: NotePairScore = {
+            ...pair,
+            ai_score: scoreResult?.score || 0,
+            last_scored: Date.now(),
+          };
 
-      if (this.settings.enable_debug_logging) {
-        console.log(`[AI Logic] Scored batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(pairs.length / batchSize)}`);
+          scoredPairs.push(scoredPair);
+
+          // ✅ 立即保存到 masterIndex.scores
+          const pairKey = `${scoredPair.note_id_1}:${scoredPair.note_id_2}`;
+          masterIndex.scores[pairKey] = scoredPair;
+        }
+
+        // ✅ 立即持久化到磁盘（增量保存）
+        await this.cacheService.saveMasterIndex(masterIndex);
+        this.cacheService.setMasterIndex(masterIndex);
+
+        if (this.settings.enable_debug_logging) {
+          console.log(`[AI Logic] Scored batch ${batchNumber}/${totalBatches} (saved to disk)`);
+        }
+
+      } catch (error) {
+        failedBatchCount++;
+        const err = error as Error;
+
+        console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} failed:`, err.message);
+
+        // ✅ 记录失败批次到日志
+        if (this.failureLogService) {
+          const pairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
+          await this.failureLogService.recordFailure({
+            operation_type: 'scoring',
+            batch_info: {
+              batch_number: batchNumber,
+              total_batches: totalBatches,
+              items: pairKeys,
+            },
+            error: {
+              message: err.message,
+              type: err.name,
+              stack: err.stack,
+              status: 'status' in err ? (err as any).status : undefined,
+            },
+          });
+        }
+
+        // ✅ 记录详细错误日志
+        if (this.errorLogger) {
+          const pairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
+          await this.errorLogger.logBatchFailure({
+            operation_type: 'scoring',
+            batch_number: batchNumber,
+            total_batches: totalBatches,
+            items: pairKeys,
+            error: err,
+            provider: this.settings.ai_provider,
+            model: this.settings.ai_model_name,
+          });
+        }
+
+        // ⚠️ 继续处理下一批次（不中断整个流程）
+        continue;
       }
+    }
+
+    if (failedBatchCount > 0) {
+      console.warn(`[AI Logic] ${failedBatchCount}/${totalBatches} batches failed. Check logs for details.`);
     }
 
     return scoredPairs;
@@ -295,70 +365,144 @@ export class AILogicService {
 
   /**
    * 批量为多个笔记生成 AI 标签
-   * 结合 batch_size_tagging 设置优化 API 调用
+   * 按 batch_size_tagging 分批处理，支持增量保存和错误恢复
    *
    * @param noteIds - 需要生成标签的笔记 ID 列表
+   * @param shouldCancel - 取消检查函数
    * @returns note_id -> 生成标签 的映射
    */
-  async generateTagsBatch(noteIds: NoteId[]): Promise<Map<NoteId, string[]>> {
+  async generateTagsBatch(noteIds: NoteId[], shouldCancel?: () => boolean): Promise<Map<NoteId, string[]>> {
     const masterIndex = this.cacheService.getMasterIndex();
     if (!masterIndex) {
       throw new Error('Master index not loaded');
     }
 
     const resultMap = new Map<NoteId, string[]>();
-
-    // 准备需要打标签的笔记集合
-    const notesForTagging: NoteForTagging[] = [];
-
-    for (const noteId of noteIds) {
-      const noteMetadata = masterIndex.notes[noteId];
-      if (!noteMetadata) {
-        console.warn(`[AI Logic] Note not found in index: ${noteId}`);
-        continue;
-      }
-
-      // Get file object
-      const file = this.app.vault.getAbstractFileByPath(noteMetadata.file_path) as TFile;
-      if (!file) {
-        console.warn(`[AI Logic] File not found: ${noteMetadata.file_path}`);
-        continue;
-      }
-
-      // Get content and extract main content (YAML之后，HASH_BOUNDARY之前)
-      const fullContent = await this.app.vault.read(file);
-      const mainContent = extractMainContent(fullContent);
-
-      notesForTagging.push({
-        note_id: noteId,
-        title: file.basename,
-        content: mainContent.substring(0, 2000), // Only main content, limit for API
-        existing_tags: noteMetadata.tags || [],
-      });
-    }
-
-    if (notesForTagging.length === 0) {
-      return resultMap;
-    }
+    const batchSize = this.settings.batch_size_tagging;
+    const totalBatches = Math.ceil(noteIds.length / batchSize);
+    let failedBatchCount = 0;
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[AI Logic] Generating tags for ${notesForTagging.length} notes in batch`);
+      console.log(`[AI Logic] Generating tags for ${noteIds.length} notes in ${totalBatches} batches`);
     }
 
-    // 一次性调用 LLM API（调用方会按 batch_size_tagging 分批）
-    const response = await this.apiService.callLLMTaggingAPI({
-      notes: notesForTagging,
-      min_tags: 3,
-      max_tags: 5,  // Updated to match new prompt limit
-    });
+    // 按批次处理
+    for (let i = 0; i < noteIds.length; i += batchSize) {
+      if (shouldCancel && shouldCancel()) {
+        console.warn('[AI Logic] 标签生成已被取消');
+        throw new Error('Task cancelled by user');
+      }
 
-    // 构建返回映射
-    for (const result of response.results) {
-      resultMap.set(result.note_id, result.tags);
+      const batch = noteIds.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
+
+      try {
+        // 准备当前批次的笔记数据
+        const notesForTagging: NoteForTagging[] = [];
+
+        for (const noteId of batch) {
+          const noteMetadata = masterIndex.notes[noteId];
+          if (!noteMetadata) {
+            console.warn(`[AI Logic] Note not found in index: ${noteId}`);
+            continue;
+          }
+
+          // Get file object
+          const file = this.app.vault.getAbstractFileByPath(noteMetadata.file_path) as TFile;
+          if (!file) {
+            console.warn(`[AI Logic] File not found: ${noteMetadata.file_path}`);
+            continue;
+          }
+
+          // Get content and extract main content (YAML之后，HASH_BOUNDARY之前)
+          const fullContent = await this.app.vault.read(file);
+          const mainContent = extractMainContent(fullContent);
+
+          notesForTagging.push({
+            note_id: noteId,
+            title: file.basename,
+            content: mainContent.substring(0, this.settings.llm_tagging_max_chars), // Only main content, limit for API
+            existing_tags: noteMetadata.tags || [],
+          });
+        }
+
+        if (notesForTagging.length === 0) {
+          if (this.settings.enable_debug_logging) {
+            console.log(`[AI Logic] Batch ${batchNumber}/${totalBatches} skipped (no valid notes)`);
+          }
+          continue;
+        }
+
+        // 调用 LLM API 进行标签生成
+        const response = await this.apiService.callLLMTaggingAPI({
+          notes: notesForTagging,
+          min_tags: 3,
+          max_tags: 5,
+        });
+
+        // 立即保存生成的标签到 masterIndex
+        for (const result of response.results) {
+          resultMap.set(result.note_id, result.tags);
+
+          // ✅ 立即更新 masterIndex
+          if (masterIndex.notes[result.note_id]) {
+            masterIndex.notes[result.note_id].tags = result.tags;
+            masterIndex.notes[result.note_id].tags_generated_at = Date.now();
+          }
+        }
+
+        // ✅ 立即持久化到磁盘（增量保存）
+        await this.cacheService.saveMasterIndex(masterIndex);
+        this.cacheService.setMasterIndex(masterIndex);
+
+        if (this.settings.enable_debug_logging) {
+          console.log(`[AI Logic] Tagged batch ${batchNumber}/${totalBatches} (${response.results.length} notes, saved to disk)`);
+        }
+
+      } catch (error) {
+        failedBatchCount++;
+        const err = error as Error;
+
+        console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} failed:`, err.message);
+
+        // ✅ 记录失败批次到日志
+        if (this.failureLogService) {
+          await this.failureLogService.recordFailure({
+            operation_type: 'tagging',
+            batch_info: {
+              batch_number: batchNumber,
+              total_batches: totalBatches,
+              items: batch,
+            },
+            error: {
+              message: err.message,
+              type: err.name,
+              stack: err.stack,
+              status: 'status' in err ? (err as any).status : undefined,
+            },
+          });
+        }
+
+        // ✅ 记录详细错误日志
+        if (this.errorLogger) {
+          await this.errorLogger.logBatchFailure({
+            operation_type: 'tagging',
+            batch_number: batchNumber,
+            total_batches: totalBatches,
+            items: batch,
+            error: err,
+            provider: this.settings.ai_provider,
+            model: this.settings.ai_model_name,
+          });
+        }
+
+        // ⚠️ 继续处理下一批次（不中断整个流程）
+        continue;
+      }
     }
 
-    if (this.settings.enable_debug_logging) {
-      console.log(`[AI Logic] Generated tags for ${resultMap.size} notes`);
+    if (failedBatchCount > 0) {
+      console.warn(`[AI Logic] ${failedBatchCount}/${totalBatches} tag batches failed. Check logs for details.`);
     }
 
     return resultMap;
@@ -396,7 +540,7 @@ export class AILogicService {
     const noteForTagging: NoteForTagging = {
       note_id: noteId,
       title: file.basename,
-      content: mainContent.substring(0, 2000), // Only main content, limit for API
+      content: mainContent.substring(0, this.settings.llm_tagging_max_chars), // Only main content, limit for API
       existing_tags: noteMetadata.tags || [],
     };
 
