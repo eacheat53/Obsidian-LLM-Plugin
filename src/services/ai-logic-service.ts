@@ -318,15 +318,20 @@ export class AILogicService {
 
         console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} failed:`, err.message);
 
+        const readableItems = batch.map(p => {
+          const path1 = masterIndex.notes[p.note_id_1]?.file_path || p.note_id_1;
+          const path2 = masterIndex.notes[p.note_id_2]?.file_path || p.note_id_2;
+          return `${path1} <-> ${path2}`;
+        });
+
         // ✅ 记录失败批次到日志
         if (this.failureLogService) {
-          const pairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
           await this.failureLogService.recordFailure({
             operation_type: 'scoring',
             batch_info: {
               batch_number: batchNumber,
               total_batches: totalBatches,
-              items: pairKeys,
+              items: readableItems,
             },
             error: {
               message: err.message,
@@ -339,12 +344,11 @@ export class AILogicService {
 
         // ✅ 记录详细错误日志
         if (this.errorLogger) {
-          const pairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
           await this.errorLogger.logBatchFailure({
             operation_type: 'scoring',
             batch_number: batchNumber,
             total_batches: totalBatches,
-            items: pairKeys,
+            items: readableItems,
             error: err,
             provider: this.settings.ai_provider,
             model: this.settings.ai_model_name,
@@ -465,6 +469,8 @@ export class AILogicService {
 
         console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} failed:`, err.message);
 
+        const readableItems = batch.map(noteId => masterIndex.notes[noteId]?.file_path || noteId);
+
         // ✅ 记录失败批次到日志
         if (this.failureLogService) {
           await this.failureLogService.recordFailure({
@@ -472,7 +478,7 @@ export class AILogicService {
             batch_info: {
               batch_number: batchNumber,
               total_batches: totalBatches,
-              items: batch,
+              items: readableItems,
             },
             error: {
               message: err.message,
@@ -489,7 +495,7 @@ export class AILogicService {
             operation_type: 'tagging',
             batch_number: batchNumber,
             total_batches: totalBatches,
-            items: batch,
+            items: readableItems,
             error: err,
             provider: this.settings.ai_provider,
             model: this.settings.ai_model_name,
