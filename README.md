@@ -1,6 +1,7 @@
-#Obsidian LLM Plugin
+# Obsidian LLM Plugin
 
 A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI services to automatically analyze notes and insert intelligent link suggestions.
+![3.png](.assets/3.png)
 
 ## Features
 
@@ -16,7 +17,7 @@ A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI se
 
 ### From Release
 
-1. Download the latest release from the [Releases](https://github.com/yourusername/obsidian-llm-plugin/releases) page
+1. Download the latest release from the [Releases](https://github.com/eacheat53/obsidian-llm-plugin/releases) page
 2. Extract the files to your vault's `.obsidian/plugins/obsidian-llm-plugin/` directory
 3. Reload Obsidian
 4. Enable the plugin in Settings → Community Plugins
