@@ -1,3 +1,22 @@
+<!-- OPENSPEC:START -->
+# OpenSpec Instructions
+
+These instructions are for AI assistants working in this project.
+
+Always open `@/openspec/AGENTS.md` when the request:
+- Mentions planning or proposals (words like proposal, spec, change, plan)
+- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+- Sounds ambiguous and you need the authoritative spec before coding
+
+Use `@/openspec/AGENTS.md` to learn:
+- How to create and apply change proposals
+- Spec format and conventions
+- Project structure and guidelines
+
+Keep this managed block so 'openspec update' can refresh the instructions.
+
+<!-- OPENSPEC:END -->
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -220,7 +239,162 @@ if (existingNote?.content_hash === contentHash) {
 
 **Impact**: 90%+ reduction in processing time for subsequent runs.
 
-### 2. Gemini Thinking Mode Token Consumption
+**Enhanced with immediate persistence**: As of the incremental persistence optimization, embeddings are now saved to disk immediately after each successful API call, ensuring no data loss on workflow interruption.
+
+```typescript
+// After successful embedding generation
+await this.cacheService.saveEmbedding({ note_id, embedding, ... });
+await this.cacheService.saveMasterIndex(masterIndex);  // ✅ Immediate save
+```
+
+### 2. Incremental Persistence and Failure Recovery
+
+**Design Goal**: Preserve all completed work when workflows are interrupted or fail mid-execution.
+
+**Implementation** (`src/main.ts:generateEmbeddingsWorkflow`):
+
+1. **Immediate Saves After Each Embedding**:
+   ```typescript
+   // For each note processed:
+   await cacheService.saveEmbedding({ note_id, embedding, ... });
+   masterIndex.notes[noteId] = { content_hash, last_processed, ... };
+   await cacheService.saveMasterIndex(masterIndex);  // ✅ Immediate save
+   ```
+
+2. **Failure Recording**:
+   ```typescript
+   try {
+     const response = await apiService.callJinaAPI(...);
+     // ... save embedding ...
+   } catch (error) {
+     await failureLogService.recordFailure({
+       operation_type: 'embedding',
+       batch_info: { items: [noteId], display_items: [filePath] },
+       error: { message, type, stack }
+     });
+     continue;  // Continue processing remaining notes
+   }
+   ```
+
+3. **Automatic Failure Cleanup**:
+   ```typescript
+   // After successful embedding:
+   const failedOps = await failureLogService.getUnresolvedFailures();
+   for (const op of failedOps) {
+     if (op.operation_type === 'embedding' && op.batch_info.items.includes(noteId)) {
+       await failureLogService.deleteFailure(op.id);  // ✅ Auto-cleanup
+     }
+   }
+   ```
+
+4. **Smart Mode Failure Retry**:
+   ```typescript
+   // Before processing loop:
+   const failedNoteIds = await failureLogService.getFailedNoteIds();
+
+   // In loop:
+   if (failedNoteIds.has(noteId) && !needsUpdate) {
+     needsUpdate = true;  // Force retry despite unchanged hash
+     console.log(`[Main] 强制重试失败笔记: ${noteId}`);
+   }
+   ```
+
+**Benefits**:
+- **Zero data loss**: Interrupting workflow after 50/100 notes preserves all 50 completed embeddings
+- **Automatic recovery**: Failed notes retried automatically on next run (smart mode)
+- **Clean failure log**: Successful operations auto-removed from failure log
+- **Cost savings**: No redundant API calls for successfully processed items
+
+**Performance Impact**: ~1-5% overhead for incremental saves (acceptable trade-off for data safety)
+
+### 3. Workflow Logic Refinements (State Consistency)
+
+**Design Goal**: Ensure `changedNoteIds` and processing state remain consistent across all edge cases (failures, cancellations, retries).
+
+**Key Refinements** (implemented in "refine-workflow-logic" proposal):
+
+1. **changedNoteIds Only Contains Successful Operations**:
+   ```typescript
+   // OLD (WRONG): Added before try block
+   if (needsUpdate || !existingNote) {
+     changedNoteIds.add(noteId);  // ❌ Added even if embedding fails
+     try {
+       await generateEmbedding();
+     } catch (error) { /* ... */ }
+   }
+
+   // NEW (CORRECT): Added after successful save
+   if (needsUpdate || !existingNote) {
+     try {
+       await generateEmbedding();
+       await saveMasterIndex(masterIndex);
+       changedNoteIds.add(noteId);  // ✅ Only added on success
+     } catch (error) { /* ... */ }
+   }
+   ```
+   **Impact**: Failed embeddings no longer participate in similarity calculation, preventing logic errors.
+
+2. **Simplified Failure Retry Logic**:
+   ```typescript
+   // OLD (18 lines of manual loop):
+   let failedNoteIds = new Set<NoteId>();
+   const embeddingFailures = await failureLogService.getUnresolvedFailures();
+   for (const op of embeddingFailures) {
+     if (op.operation_type === 'embedding') {
+       for (const item of op.batch_info.items) {
+         embeddingFailedIds.add(item);
+       }
+     }
+   }
+
+   // NEW (single API call):
+   const failedNoteIds = await failureLogService.getFailedNoteIdsByType('embedding');
+   ```
+   **Benefits**: Code duplication eliminated, uses centralized failure tracking API.
+
+3. **Embedding Verification for Tag Generation**:
+   ```typescript
+   for (const [noteId, metadata] of Object.entries(masterIndex.notes)) {
+     if (!metadata.tags_generated_at) {
+       // ✅ Verify embedding exists before generating tags
+       const embResult = await cacheService.loadEmbedding(noteId);
+       if (embResult.success && embResult.embedding) {
+         notesNeedingTags.add(noteId);
+       } else if (settings.enable_debug_logging) {
+         console.log(`[Main] 跳过标签生成（无 embedding）: ${noteId}`);
+       }
+     }
+   }
+   ```
+   **Impact**: Tags only generated for notes with embeddings, preventing incomplete semantic understanding.
+
+4. **Comprehensive Processing Statistics**:
+   ```typescript
+   if (settings.enable_debug_logging) {
+     const failedCount = files.length - newEmbeddingsCount - skippedCount;
+     console.log(`[Main] Embedding 处理统计:
+       - 总笔记: ${files.length}
+       - 跳过（hash 未变）: ${skippedCount}
+       - 成功生成 embedding: ${newEmbeddingsCount}
+       - 失败: ${failedCount}
+       - changedNoteIds (成功): ${changedNoteIds.size}
+     `);
+   }
+   ```
+   **Benefits**: Clear visibility into workflow execution for debugging.
+
+**Edge Cases Handled**:
+- ✅ Embedding fails → Note NOT in `changedNoteIds` → No incorrect similarity calculation
+- ✅ Workflow canceled → changedNoteIds only contains completed notes → Correct incremental resume
+- ✅ Tag generation without embedding → Skipped with debug log → No incomplete tags
+- ✅ Failed note retry → Auto-detected via `getFailedNoteIdsByType()` → Forced update despite unchanged hash
+
+**Success Metrics**:
+- `changedNoteIds.size === successfully embedded notes` (exact equality)
+- Failed notes auto-retry on next run (smart mode)
+- No tags generated for notes without embeddings
+
+### 4. Gemini Thinking Mode Token Consumption
 
 **Problem**: Gemini 2.5 uses "Extended Thinking" mode, consuming significant tokens for internal reasoning.
 
@@ -248,7 +422,7 @@ if (finishReason === 'MAX_TOKENS') {
 **Alternative**: Use `gemini-1.5-flash` (no thinking mode) for even faster responses
 
 
-### 3. Atomic Cache Writes
+### 4. Atomic Cache Writes
 
 ```typescript
 // Write to temp file, then rename (atomic operation)
@@ -259,7 +433,7 @@ await fs.rename(tempFile, indexFile);  // Atomic!
 
 Prevents corruption if process crashes mid-write.
 
-### 4. Task Locking Mechanism
+### 5. Task Locking Mechanism
 
 The `TaskManagerService` prevents concurrent operations via mutex:
 
@@ -272,7 +446,7 @@ this.taskLock = true;
 
 Prevents race conditions in cache updates.
 
-### 5. Three-Tier Error Classification
+### 6. Three-Tier Error Classification
 
 From `src/utils/error-classifier.ts`:
 
@@ -328,6 +502,35 @@ Settings stored per-provider in `provider_configs`. When switching:
 2. New provider's config is loaded
 
 **Never directly modify** `ai_api_url`, `ai_api_key`, `ai_model_name` without syncing to `provider_configs`.
+
+### 6. Link Threshold Filtering
+
+Links inserted by the plugin are **always** filtered by current threshold settings:
+- `similarity_threshold`: Minimum cosine similarity (default: 0.7)
+- `min_ai_score`: Minimum LLM score (default: 7)
+
+**Important**: When you modify thresholds and re-run the workflow (even in smart mode), links that no longer meet the new thresholds will be removed.
+
+**Example**:
+- Initial run with `min_ai_score=7` → inserts links with score=7, 8, 9
+- User changes `min_ai_score` to 8
+- Re-run workflow → removes links with score=7, keeps score=8, 9
+
+This ensures displayed links always match your current quality standards. Both `similarity_threshold` and `min_ai_score` must be satisfied (AND logic, not OR).
+
+**How to apply new thresholds**:
+1. **Settings UI** (Recommended): Go to Settings → Link Settings → Click "Recalibrate Now"
+2. **Sidebar Menu**: Click ribbon icon → "重新校准链接（应用新阈值）"
+
+Both methods use the same underlying workflow and are instant (no API calls).
+
+**Similarity Threshold Behavior**:
+- **Minimum recommended**: 0.7 (enforced in Settings UI)
+- **Increasing threshold** (0.7 → 0.8): Only requires recalibration (fast)
+- **Decreasing threshold** (0.8 → 0.7): Requires force mode to re-compute similarities
+- **Warning**: Values below 0.7 significantly increase candidate pairs sent to LLM, wasting tokens
+
+**Implementation**: `LinkInjectorService._listTargetsFromPairs` filters pairs before selecting top N links, consistent with `AILogicService.filterByThresholds`.
 
 ## Key Files Reference
 

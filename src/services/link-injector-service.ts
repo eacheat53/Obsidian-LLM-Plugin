@@ -186,11 +186,25 @@ export class LinkInjectorService {
   }
 
   private _listTargetsFromPairs(relevant: NotePairScore[]): NoteId[] {
+    // ✅ Filter by thresholds (consistent with AILogicService.filterByThresholds)
+    const filtered = relevant.filter(p =>
+      p.similarity_score >= this.settings.similarity_threshold &&
+      p.ai_score >= this.settings.min_ai_score
+    );
+
+    // Debug logging for filtering results
+    if (this.settings.enable_debug_logging && filtered.length < relevant.length) {
+      console.log(`[Link Injector] Filtered ${relevant.length - filtered.length} pairs below threshold (${relevant.length} -> ${filtered.length})`);
+    }
+
+    // Deduplication
     const seen = new Set<NoteId>();
     const unique: NotePairScore[] = [];
-    for (const p of relevant) {
+    for (const p of filtered) {
       if (!seen.has(p.note_id_2)) { seen.add(p.note_id_2); unique.push(p); }
     }
+
+    // Sort by ai_score descending and take top N
     unique.sort((a,b)=> b.ai_score - a.ai_score);
     return unique.slice(0, this.settings.max_links_per_note).map(p=>p.note_id_2);
   }

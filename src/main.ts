@@ -159,6 +159,7 @@ export default class ObsidianLLMPlugin extends Plugin {
     try {
       await this.taskManagerService.startTask('Generate Embeddings', async (updateProgress) => {
         this.notifier.beginProgress('notices.starting', { mode: forceMode ? '强制' : '智能' });
+
         // 步骤 1：加载主索引
         updateProgress(0, 'Loading cache...');
         const loadResult = await this.cacheService.loadMasterIndex({
@@ -203,6 +204,15 @@ export default class ObsidianLLMPlugin extends Plugin {
         let skippedCount = 0;
         const changedNoteIds = new Set<NoteId>();
 
+        // ✅ 强制重试失败集合中的笔记（智能模式）
+        const failedNoteIds = this.failureLogService
+          ? await this.failureLogService.getFailedNoteIdsByType('embedding')
+          : new Set<NoteId>();
+
+        if (failedNoteIds.size > 0 && this.settings.enable_debug_logging) {
+          console.log(`[Main] 发现 ${failedNoteIds.size} 个失败的嵌入操作，将强制重试`);
+        }
+
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
 
@@ -219,6 +229,15 @@ export default class ObsidianLLMPlugin extends Plugin {
           const existingNote = masterIndex.notes[noteId];
           let needsUpdate = forceMode || !existingNote || existingNote.content_hash !== contentHash;
 
+          // ✅ 强制重试失败笔记（智能模式）
+          const isFailedNote = failedNoteIds.has(noteId);
+          if (isFailedNote && !needsUpdate) {
+            needsUpdate = true;
+            if (this.settings.enable_debug_logging) {
+              console.log(`[Main] 强制重试失败笔记: ${file.basename} (${noteId})`);
+            }
+          }
+
           if (!needsUpdate && existingNote) {
             // 内容未更改，跳过
             skippedCount++;
@@ -234,44 +253,113 @@ export default class ObsidianLLMPlugin extends Plugin {
               console.log(`[Main] Processing ${file.basename} (${needsUpdate ? 'changed' : 'new'})`);
             }
 
-            // 标记为已更改以使缓存无效
-            changedNoteIds.add(noteId);
-
-            // 调用 Jina API
-            const response = await this.apiService.callJinaAPI({
-              input: [mainContent],
-              model: this.settings.jina_model_name,
-              note_ids: [noteId],
-            });
-
-            if (response.data.length > 0) {
-              const embedding = response.data[0].embedding;
-              newEmbeddingsCount++;
-
-              // 保存嵌入
-              await this.cacheService.saveEmbedding({
-                note_id: noteId,
-                embedding,
-                model_name: this.settings.jina_model_name,
-                created_at: Date.now(),
-                content_preview: mainContent.substring(0, 200),
+            try {
+              // 调用 Jina API
+              const response = await this.apiService.callJinaAPI({
+                input: [mainContent],
+                model: this.settings.jina_model_name,
+                note_ids: [noteId],
               });
 
-              // 使用笔记元数据更新主索引
-              const content = await this.app.vault.read(file);
-              masterIndex.notes[noteId] = {
-                note_id: noteId,
-                file_path: file.path,
-                content_hash: contentHash,
-                last_processed: Date.now(),
-                tags: existingNote?.tags || [],
-                has_frontmatter: content.startsWith('---'),
-                has_hash_boundary: content.includes('<!-- HASH_BOUNDARY -->'),
-                has_links_section: content.includes('<!-- LINKS_START -->'),
-              };
+              if (response.data.length > 0) {
+                const embedding = response.data[0].embedding;
+                newEmbeddingsCount++;
 
-              // 使此笔记的分数无效（清除相关配对）
-              this.invalidateScoresForNote(masterIndex, noteId);
+                // 保存嵌入
+                await this.cacheService.saveEmbedding({
+                  note_id: noteId,
+                  embedding,
+                  model_name: this.settings.jina_model_name,
+                  created_at: Date.now(),
+                  content_preview: mainContent.substring(0, 200),
+                });
+
+                // 使用笔记元数据更新主索引
+                const content = await this.app.vault.read(file);
+                masterIndex.notes[noteId] = {
+                  note_id: noteId,
+                  file_path: file.path,
+                  content_hash: contentHash,
+                  last_processed: Date.now(),
+                  tags: existingNote?.tags || [],
+                  has_frontmatter: content.startsWith('---'),
+                  has_hash_boundary: content.includes('<!-- HASH_BOUNDARY -->'),
+                  has_links_section: content.includes('<!-- LINKS_START -->'),
+                };
+
+                // 使此笔记的分数无效（清除相关配对）
+                this.invalidateScoresForNote(masterIndex, noteId);
+
+                // ✅ 立即持久化到磁盘（增量保存）
+                await this.cacheService.saveMasterIndex(masterIndex);
+                this.cacheService.setMasterIndex(masterIndex);
+
+                if (this.settings.enable_debug_logging) {
+                  console.log(`[Main] Saved masterIndex after embedding note: ${noteId}`);
+                }
+
+                // ✅ 成功后删除失败集合中的相关记录
+                if (this.failureLogService) {
+                  const failedOps = await this.failureLogService.getUnresolvedFailures();
+
+                  for (const op of failedOps) {
+                    if (op.operation_type === 'embedding') {
+                      // 检查这个失败操作中的笔记ID是否是当前成功的笔记
+                      const hasSuccessfulNote = op.batch_info.items.includes(noteId);
+
+                      if (hasSuccessfulNote) {
+                        await this.failureLogService.deleteFailure(op.id);
+                        if (this.settings.enable_debug_logging) {
+                          console.log(`[Main] 已从失败集合中删除嵌入操作: ${op.id}`);
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // ✅ 只在成功后标记为已更改（用于后续的相似度计算）
+                changedNoteIds.add(noteId);
+              }
+            } catch (error) {
+              const err = error as Error;
+              const errorMessage = err.message || String(error);
+
+              console.error(`[Main] Failed to generate embedding for ${file.basename}:`, errorMessage);
+
+              // ✅ 记录失败到日志
+              if (this.failureLogService) {
+                await this.failureLogService.recordFailure({
+                  operation_type: 'embedding',
+                  batch_info: {
+                    batch_number: i + 1,
+                    total_batches: files.length,
+                    items: [noteId],
+                    display_items: [file.path],
+                  },
+                  error: {
+                    message: err.message,
+                    type: err.name,
+                    stack: err.stack,
+                    status: 'status' in err ? (err as any).status : undefined,
+                  },
+                });
+              }
+
+              // ✅ 记录详细错误日志
+              if (this.errorLogger) {
+                await this.errorLogger.logBatchFailure({
+                  operation_type: 'embedding',
+                  batch_number: i + 1,
+                  total_batches: files.length,
+                  items: [noteId],
+                  error: err,
+                  provider: this.settings.ai_provider,
+                  model: this.settings.jina_model_name,
+                });
+              }
+
+              // ⚠️ 继续处理下一笔记（不中断整个流程）
+              continue;
             }
           }
 
@@ -286,6 +374,18 @@ export default class ObsidianLLMPlugin extends Plugin {
         // 使用更新的元数据保存主索引
         await this.cacheService.saveMasterIndex(masterIndex);
         this.cacheService.setMasterIndex(masterIndex);
+
+        // ✅ 输出处理统计信息
+        if (this.settings.enable_debug_logging) {
+          const failedCount = files.length - newEmbeddingsCount - skippedCount;
+          console.log(`[Main] Embedding 处理统计:
+  - 总笔记: ${files.length}
+  - 跳过（hash 未变）: ${skippedCount}
+  - 成功生成 embedding: ${newEmbeddingsCount}
+  - 失败: ${failedCount}
+  - changedNoteIds (成功): ${changedNoteIds.size}
+`);
+        }
 
         // 可选的后续操作：对于已更改的笔记，计算配对、评分并插入链接
         if (changedNoteIds.size > 0) {
@@ -361,54 +461,103 @@ export default class ObsidianLLMPlugin extends Plugin {
             if (this.settings.enable_debug_logging) {
               console.log(`[Main] 链接校准完成, 受影响笔记:  ${affected.size}, changes: ${totalReconciled}`);
             }
+          }
+        }
 
-            // 为更改的笔记生成/更新标签并写入 YAML
-            updateProgress(95, 'Generating tags for changed notes...');
-            const changedList = Array.from(changedNoteIds);
+        // 为笔记生成/更新标签并写入 YAML（独立处理，不依赖 changedNoteIds）
+        updateProgress(95, 'Generating tags...');
 
-            // generateTagsBatch 现在内部按批次处理，并自动保存到 masterIndex
-            const allGeneratedTags = await this.aiLogicService.generateTagsBatch(
-              changedList,
-              () => this.taskManagerService.isCancellationRequested()
-            );
+        // ✅ 收集需要生成标签的笔记：
+        // 1. 内容变化的笔记（changedNoteIds）
+        // 2. 没有 tags_generated_at 的笔记（标签未完成写入）
+        // ✅ 关键改进：只为有 embedding 的笔记生成标签
+        const notesNeedingTags = new Set<NoteId>([...changedNoteIds]);
 
-            // 将标签写入 YAML front-matter
-            updateProgress(96, 'Updating YAML with tags...');
-            this.notifier.info('notices.taggingDone', { count: changedList.length }, true);
-            for (const nid of changedList) {
-              const file = fileMap[nid];
-              const tags = allGeneratedTags.get(nid);
-              if (!file || !tags || tags.length === 0) continue;
+        for (const [noteId, metadata] of Object.entries(masterIndex.notes)) {
+          if (!metadata.tags_generated_at) {
+            // ✅ 验证 embedding 是否存在
+            const embResult = await this.cacheService.loadEmbedding(noteId as NoteId);
+            if (embResult.success && embResult.embedding) {
+              notesNeedingTags.add(noteId as NoteId);
+            } else if (this.settings.enable_debug_logging) {
+              console.log(`[Main] 跳过标签生成（无 embedding）: ${noteId}`);
+            }
+          }
+        }
 
-              try {
-                const content = await this.app.vault.read(file);
-                const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
-                const match = content.match(frontMatterRegex);
-                let newContent = content;
-                const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
+        if (notesNeedingTags.size > 0) {
+          const notesList = Array.from(notesNeedingTags);
 
-                if (match) {
-                  const existingFM = match[1];
-                  if (existingFM.includes('tags:')) {
-                    const updatedFM = existingFM.replace(/tags:.*/, tagsLine);
-                    newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
-                  } else {
-                    const updatedFM = `${existingFM}\n${tagsLine}`;
-                    newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
-                  }
-                } else {
-                  newContent = `---\n${tagsLine}\n---\n\n${content}`;
-                }
+          if (this.settings.enable_debug_logging) {
+            console.log(`[Main] 需要生成标签的笔记: ${notesList.length} (${changedNoteIds.size} changed + ${notesList.length - changedNoteIds.size} incomplete)`);
+          }
 
-                await this.app.vault.modify(file, newContent);
-              } catch (err) {
-                console.error(`[Main] Failed to update YAML for ${file.path}:`, err);
+          // 构建 fileMap（如果还不存在）
+          const fileMap: Record<string, TFile> = {};
+          for (const nid of notesList) {
+            const metadata = masterIndex.notes[nid];
+            if (metadata) {
+              const file = this.app.vault.getAbstractFileByPath(metadata.file_path) as TFile;
+              if (file) {
+                fileMap[nid] = file;
               }
             }
-
-            // 标签更新后持久化索引
-            await this.cacheService.saveMasterIndex(masterIndex);
           }
+
+          // generateTagsBatch 现在内部按批次处理，并自动保存到 masterIndex
+          // ✅ 提供回调函数，每个批次完成后立即写入YAML
+          const allGeneratedTags = await this.aiLogicService.generateTagsBatch(
+            notesList,
+            () => this.taskManagerService.isCancellationRequested(),
+            async (batchResults: Map<NoteId, string[]>) => {
+              // 批次完成回调：立即写入YAML到笔记
+              for (const [nid, tags] of batchResults) {
+                const file = fileMap[nid];
+                if (!file || !tags || tags.length === 0) continue;
+
+                try {
+                  const content = await this.app.vault.read(file);
+                  const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
+                  const match = content.match(frontMatterRegex);
+                  let newContent = content;
+                  const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
+
+                  if (match) {
+                    const existingFM = match[1];
+                    if (existingFM.includes('tags:')) {
+                      const updatedFM = existingFM.replace(/tags:.*/, tagsLine);
+                      newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
+                    } else {
+                      const updatedFM = `${existingFM}\n${tagsLine}`;
+                      newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
+                    }
+                  } else {
+                    newContent = `---\n${tagsLine}\n---\n\n${content}`;
+                  }
+
+                  await this.app.vault.modify(file, newContent);
+
+                  // ✅ 只有在成功写入front-matter后才设置tags_generated_at
+                  if (masterIndex.notes[nid]) {
+                    masterIndex.notes[nid].tags_generated_at = Date.now();
+                  }
+
+                  if (this.settings.enable_debug_logging) {
+                    console.log(`[Main] 已写入标签到 YAML: ${file.basename}`);
+                  }
+                } catch (err) {
+                  console.error(`[Main] Failed to update YAML for ${file.path}:`, err);
+                }
+              }
+
+              // ✅ 批次写入完成后，立即保存 masterIndex
+              await this.cacheService.saveMasterIndex(masterIndex);
+            }
+          );
+
+          // 将标签写入 YAML front-matter（已在回调中完成，这里移除重复代码）
+          updateProgress(96, 'Updating YAML with tags...');
+          this.notifier.info('notices.taggingDone', { count: notesList.length }, true);
         }
 
         updateProgress(100, 'Done!');
@@ -987,78 +1136,80 @@ export default class ObsidianLLMPlugin extends Plugin {
         // 步骤 4：生成标签（内部按批次处理并自动保存）
         updateProgress(30, 'Generating tags...');
 
+        let totalTagsGenerated = 0;
+        let successCount = 0;
+
         // generateTagsBatch 现在内部按批次处理，并自动保存到 masterIndex
+        // ✅ 提供回调函数，每个批次完成后立即写入YAML
         const allGeneratedTags = await this.aiLogicService.generateTagsBatch(
           noteIds,
-          () => this.taskManagerService.isCancellationRequested()
-        );
+          () => this.taskManagerService.isCancellationRequested(),
+          async (batchResults: Map<NoteId, string[]>) => {
+            // 批次完成回调：立即写入YAML到笔记
+            for (const [noteId, tags] of batchResults) {
+              if (!tags || tags.length === 0) continue;
 
-        let totalTagsGenerated = 0;
-        for (const tags of allGeneratedTags.values()) {
-          totalTagsGenerated += tags.length;
-        }
+              const file = fileMap.get(noteId);
+              if (!file) continue;
 
-        // 步骤 5：更新所有笔记的 front-matter
-        updateProgress(80, 'Updating note front-matter...');
+              try {
+                // 读取当前内容
+                const content = await this.app.vault.read(file);
 
-        for (let i = 0; i < noteIds.length; i++) {
-          const noteId = noteIds[i];
-          const tags = allGeneratedTags.get(noteId);
+                // 解析 front-matter
+                const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
+                const match = content.match(frontMatterRegex);
 
-          if (!tags || tags.length === 0) {
-            continue;
-          }
+                let newContent = content;
 
-          const file = fileMap.get(noteId);
-          if (!file) {
-            continue;
-          }
+                if (match) {
+                  // 更新现有的 front-matter
+                  const existingFM = match[1];
+                  const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
 
-          try {
-            // 读取当前内容
-            const content = await this.app.vault.read(file);
+                  // 检查标签字段是否存在
+                  if (existingFM.includes('tags:')) {
+                    // 替换现有标签
+                    const updatedFM = existingFM.replace(/tags:.*/, tagsLine);
+                    newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
+                  } else {
+                    // 将标签添加到 front-matter
+                    const updatedFM = `${existingFM}\n${tagsLine}`;
+                    newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
+                  }
+                } else {
+                  // 使用标签创建新的 front-matter
+                  const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
+                  newContent = `---\n${tagsLine}\n---\n\n${content}`;
+                }
 
-            // 解析 front-matter
-            const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
-            const match = content.match(frontMatterRegex);
+                // 写入更新的内容
+                await this.app.vault.modify(file, newContent);
 
-            let newContent = content;
+                // ✅ 只有在成功写入 front-matter 后，才设置 tags_generated_at
+                if (masterIndex.notes[noteId]) {
+                  masterIndex.notes[noteId].tags_generated_at = Date.now();
+                }
 
-            if (match) {
-              // 更新现有的 front-matter
-              const existingFM = match[1];
-              const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
+                successCount++;
+                totalTagsGenerated += tags.length;
 
-              // 检查标签字段是否存在
-              if (existingFM.includes('tags:')) {
-                // 替换现有标签
-                const updatedFM = existingFM.replace(/tags:.*/, tagsLine);
-                newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
-              } else {
-                // 将标签添加到 front-matter
-                const updatedFM = `${existingFM}\n${tagsLine}`;
-                newContent = content.replace(frontMatterRegex, `---\n${updatedFM}\n---`);
+                if (this.settings.enable_debug_logging) {
+                  console.log(`[Main] 已写入标签到 YAML: ${file.basename}`);
+                }
+              } catch (error) {
+                console.error(`[Main] Failed to update front-matter for ${file.path}:`, error);
+                // 如果写入失败，不设置 tags_generated_at，下次会重试
               }
-            } else {
-              // 使用标签创建新的 front-matter
-              const tagsLine = `tags: [${tags.map(t => `"${t}"`).join(', ')}]`;
-              newContent = `---\n${tagsLine}\n---\n\n${content}`;
             }
 
-            // 写入更新的内容
-            await this.app.vault.modify(file, newContent);
-          } catch (error) {
-            console.error(`[Main] Failed to update front-matter for ${file.path}:`, error);
-            // 继续处理下一个文件
+            // ✅ 批次写入完成后，立即保存 masterIndex
+            await this.cacheService.saveMasterIndex(masterIndex);
           }
+        );
 
-          updateProgress(80 + ((i / noteIds.length) * 15), `Updating note ${i + 1}/${noteIds.length}...`);
-
-          // 检查是否取消
-          if (this.taskManagerService.isCancellationRequested()) {
-            throw new Error('Task cancelled by user');
-          }
-        }
+        // 步骤 5：更新所有笔记的 front-matter（已在回调中完成，这里移除重复代码）
+        updateProgress(80, 'Updating note front-matter...');
 
         // 步骤 6：保存更新的缓存
         updateProgress(95, 'Saving cache...');
@@ -1071,6 +1222,110 @@ export default class ObsidianLLMPlugin extends Plugin {
       const err = error as Error;
       new Notice(`❌ Error: ${err.message}`);
       console.error('[Main] Batch insert tags workflow failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 重新校准链接工作流
+   * 基于现有的 masterIndex.scores 和当前阈值设置，重新插入/删除链接
+   * 不重新生成 embedding 或重新评分，适用于用户修改阈值后的快速校准
+   *
+   * @param targetPath - 要扫描的路径
+   */
+  async recalibrateLinksWorkflow(targetPath: string): Promise<void> {
+    try {
+      await this.taskManagerService.startTask('Recalibrate Links', async (updateProgress) => {
+        this.notifier.beginProgress('notices.starting', { mode: '链接校准' });
+
+        // 步骤 1：加载主索引
+        updateProgress(0, 'Loading cache...');
+        const loadResult = await this.cacheService.loadMasterIndex({
+          detect_orphans: false,
+          create_if_missing: false
+        });
+
+        if (!loadResult.success || !loadResult.index) {
+          throw new Error('Failed to load master index. Please run embedding generation first.');
+        }
+
+        const masterIndex = loadResult.index;
+
+        // 检查是否有可用的 scores
+        const scoreCount = Object.keys(masterIndex.scores || {}).length;
+        if (scoreCount === 0) {
+          new Notice('No scores found. Please run the main workflow first to generate scores.');
+          return;
+        }
+
+        // 步骤 2：扫描保险库中的笔记
+        updateProgress(10, 'Scanning vault...');
+        const files = await this.noteProcessorService.scanVault(targetPath);
+
+        if (files.length === 0) {
+          new Notice('No files found to process');
+          return;
+        }
+
+        // 步骤 3：为每个笔记重新校准链接
+        updateProgress(20, 'Recalibrating links...');
+        let totalAdded = 0;
+        let totalRemoved = 0;
+        let processedCount = 0;
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const noteId = await this.noteProcessorService.ensureNoteHasId(file);
+
+          // 使用全量 masterIndex.scores 和当前阈值计算期望的链接目标
+          // ✅ getDesiredTargetsFromScores 内部会调用 _listTargetsFromPairs
+          // ✅ _listTargetsFromPairs 现在会按当前阈值过滤
+          const desired = this.linkInjectorService.getDesiredTargetsFromScores(noteId, masterIndex.scores);
+
+          // 使用 ledger 进行增删对账
+          const res = await this.linkInjectorService.reconcileUsingLedger(file, noteId, desired);
+
+          if (res.added > 0 || res.removed > 0) {
+            totalAdded += res.added;
+            totalRemoved += res.removed;
+            processedCount++;
+          }
+
+          updateProgress(20 + (i / files.length) * 75, `Processed ${i + 1}/${files.length} notes (${totalAdded} added, ${totalRemoved} removed)`);
+
+          // 检查是否取消
+          if (this.taskManagerService.isCancellationRequested()) {
+            throw new Error('Task cancelled by user');
+          }
+        }
+
+        // 步骤 4：保存更新的 ledger
+        updateProgress(95, 'Saving ledger...');
+        await this.cacheService.saveMasterIndex(masterIndex);
+
+        updateProgress(100, 'Done!');
+        this.notifier.endProgress();
+
+        if (processedCount === 0) {
+          new Notice('✅ All links already match current thresholds. No changes needed.');
+        } else {
+          new Notice(`✅ Recalibrated ${processedCount} notes: +${totalAdded} links, -${totalRemoved} links`);
+        }
+
+        if (this.settings.enable_debug_logging) {
+          console.log(`[Main] 链接校准完成:
+  - 处理笔记: ${files.length}
+  - 修改笔记: ${processedCount}
+  - 添加链接: ${totalAdded}
+  - 删除链接: ${totalRemoved}
+  - 当前阈值: similarity>=${this.settings.similarity_threshold}, score>=${this.settings.min_ai_score}
+`);
+        }
+      });
+    } catch (error) {
+      const err = error as Error;
+      new Notice(`❌ Error: ${err.message}`);
+      console.error('[Main] Recalibrate links workflow failed:', error);
       throw error;
     }
   }

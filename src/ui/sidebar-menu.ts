@@ -53,6 +53,20 @@ export class SidebarMenuService {
         })
     );
 
+    // 重新校准链接：基于当前阈值重新插入/删除链接（不重新评分）
+    menu.addItem((item) =>
+      item
+        .setTitle('重新校准链接（应用新阈值）')
+        .setIcon('refresh-cw')
+        .onClick(async () => {
+          try {
+            await this.plugin.recalibrateLinksWorkflow(this.plugin.settings.default_scan_path);
+          } catch (error) {
+            console.error('[Sidebar Menu] Recalibrate links failed:', error);
+          }
+        })
+    );
+
 
     menu.showAtMouseEvent(evt);
   }

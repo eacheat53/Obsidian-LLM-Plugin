@@ -4,11 +4,108 @@
  * 支持中英文
  */
 
-import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import ObsidianLLMPlugin from '../main';
 import { DEFAULT_SCORING_PROMPT, DEFAULT_TAGGING_PROMPT, DEFAULT_SETTINGS } from '../plugin-settings';
 import { LLMProvider } from '../types/api-types';
 import { t, Translation } from '../i18n/translations';
+
+/**
+ * 确认对话框模态框
+ */
+class ConfirmModal extends Modal {
+  private title: string;
+  private message: string;
+  private confirmText: string;
+  private placeholder: string;
+  private onConfirm: () => void;
+
+  constructor(
+    app: App,
+    title: string,
+    message: string,
+    confirmText: string,
+    placeholder: string,
+    onConfirm: () => void
+  ) {
+    super(app);
+    this.title = title;
+    this.message = message;
+    this.confirmText = confirmText;
+    this.placeholder = placeholder;
+    this.onConfirm = onConfirm;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    contentEl.createEl('h2', { text: this.title });
+
+    // 显示消息
+    const messageEl = contentEl.createDiv({ cls: 'modal-content' });
+    messageEl.style.whiteSpace = 'pre-wrap';
+    messageEl.style.marginBottom = '20px';
+    messageEl.textContent = this.message;
+
+    // 输入框
+    let inputValue = '';
+    const inputContainer = contentEl.createDiv({ cls: 'modal-input-container' });
+    const input = inputContainer.createEl('input', {
+      type: 'text',
+      placeholder: this.placeholder,
+    });
+    input.style.width = '100%';
+    input.style.marginBottom = '20px';
+
+    input.addEventListener('input', (e) => {
+      inputValue = (e.target as HTMLInputElement).value;
+    });
+
+    // 按钮容器
+    const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'flex-end';
+    buttonContainer.style.gap = '10px';
+
+    // 取消按钮
+    const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+    cancelButton.addEventListener('click', () => {
+      this.close();
+    });
+
+    // 确认按钮
+    const confirmButton = buttonContainer.createEl('button', {
+      text: this.confirmText,
+      cls: 'mod-warning',
+    });
+    confirmButton.addEventListener('click', () => {
+      if (inputValue === this.confirmText) {
+        this.close();
+        this.onConfirm();
+      } else {
+        new Notice(`Please type "${this.confirmText}" to confirm`);
+      }
+    });
+
+    // 回车确认
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        confirmButton.click();
+      } else if (e.key === 'Escape') {
+        this.close();
+      }
+    });
+
+    // 聚焦到输入框
+    input.focus();
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
 
 /**
  * 设置选项卡类
@@ -396,9 +493,11 @@ export class SettingsTab extends PluginSettingTab {
         .setValue(String(this.plugin.settings.similarity_threshold))
         .onChange(async (value) => {
           const num = parseFloat(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
+          if (!isNaN(num) && num >= 0.7 && num <= 1) {
             this.plugin.settings.similarity_threshold = num;
             await this.plugin.saveSettings();
+          } else if (num < 0.7) {
+            new Notice(this.tr.notices.similarityTooLow);
           }
         })
       )
@@ -406,7 +505,7 @@ export class SettingsTab extends PluginSettingTab {
         const textInput = setting.controlEl.querySelector('input');
         if (textInput) {
           textInput.type = 'number';
-          textInput.min = '0';
+          textInput.min = '0.7';
           textInput.max = '1';
           textInput.step = '0.05';
         }
@@ -459,6 +558,28 @@ export class SettingsTab extends PluginSettingTab {
           textInput.step = '1';
         }
       });
+
+    // 重新校准链接按钮
+    new Setting(containerEl)
+      .setName(this.tr.settings.recalibrateLinks?.name || '重新校准链接')
+      .setDesc(this.tr.settings.recalibrateLinks?.desc || '修改上述阈值后，点击此按钮应用新配置到所有笔记。不会重新生成 embedding 或重新评分，只会根据新阈值重新插入/删除链接。')
+      .addButton(button => button
+        .setButtonText(this.tr.buttons?.recalibrate || '立即校准')
+        .setCta()
+        .onClick(async () => {
+          button.setDisabled(true);
+          button.setButtonText(this.tr.buttons?.recalibrating || '校准中...');
+          try {
+            await this.plugin.recalibrateLinksWorkflow(this.plugin.settings.default_scan_path);
+          } catch (error) {
+            console.error('[Settings] Recalibrate links failed:', error);
+            new Notice('❌ 链接校准失败，请查看控制台错误信息');
+          } finally {
+            button.setDisabled(false);
+            button.setButtonText(this.tr.buttons?.recalibrate || '立即校准');
+          }
+        })
+      );
   }
 
   /**
@@ -694,7 +815,7 @@ export class SettingsTab extends PluginSettingTab {
         })
       );
 
-    // 清除缓存按钮
+    // 清除缓存按钮（带确认对话框）
     new Setting(containerEl)
       .setName(this.tr.settings.clearCache.name)
       .setDesc(this.tr.settings.clearCache.desc)
@@ -702,15 +823,26 @@ export class SettingsTab extends PluginSettingTab {
         .setButtonText(this.tr.buttons.clearCache)
         .setWarning()
         .onClick(async () => {
-          try {
-            const cacheService = this.plugin.getCacheService();
-            await cacheService.clearCache();
-            new Notice(this.tr.notices.cacheClearSuccess);
-          } catch (error) {
-            const err = error as Error;
-            new Notice(`${this.tr.notices.cacheClearFailed}: ${err.message}`);
-            console.error('[Settings] 清除缓存失败:', error);
-          }
+          // 显示确认对话框
+          const modal = new ConfirmModal(
+            this.app,
+            this.tr.dialogs.clearCacheTitle,
+            this.tr.dialogs.clearCacheMessage,
+            this.tr.buttons.clearCache,
+            this.tr.dialogs.clearCacheConfirmPlaceholder,
+            async () => {
+              try {
+                const cacheService = this.plugin.getCacheService();
+                await cacheService.clearCache();
+                new Notice(this.tr.notices.cacheClearSuccess);
+              } catch (error) {
+                const err = error as Error;
+                new Notice(`${this.tr.notices.cacheClearFailed}: ${err.message}`);
+                console.error('[Settings] 清除缓存失败:', error);
+              }
+            }
+          );
+          modal.open();
         })
       );
 
@@ -749,6 +881,48 @@ export class SettingsTab extends PluginSettingTab {
             const err = error as Error;
             new Notice(`${this.tr.notices.cancelFailed}: ${err.message}`);
             console.error('[Settings] 取消操作失败:', error);
+          }
+        })
+      );
+
+    // 查看日志按钮
+    new Setting(containerEl)
+      .setName(this.tr.settings.viewLogs.name)
+      .setDesc(this.tr.settings.viewLogs.desc)
+      .addButton(button => button
+        .setButtonText(this.tr.buttons.viewLogs)
+        .onClick(async () => {
+          try {
+            // @ts-ignore - Obsidian 内部 API
+            const basePath = this.app.vault.adapter.basePath;
+            const pluginDir = `${basePath}/.obsidian/plugins/obsidian-llm-plugin`;
+
+            // 使用正确的 API: app.showInFolder
+            // 由于 showInFolder 需要一个文件路径，我们需要指向一个实际存在的日志文件
+            // 如果文件不存在，我们可以使用 Obsidian 的 openExternal 来打开文件夹
+            const { exec } = require('child_process');
+            const platform = require('os').platform();
+
+            // 根据不同平台打开文件夹
+            let command: string;
+            if (platform === 'win32') {
+              command = `explorer "${pluginDir}"`;
+            } else if (platform === 'darwin') {
+              command = `open "${pluginDir}"`;
+            } else {
+              command = `xdg-open "${pluginDir}"`;
+            }
+
+            exec(command, (error: Error | null) => {
+              if (error) {
+                console.error('[Settings] 打开日志文件夹失败:', error);
+                new Notice(this.tr.notices.viewLogsFailed);
+              }
+            });
+          } catch (error) {
+            const err = error as Error;
+            new Notice(`${this.tr.notices.viewLogsFailed}: ${err.message}`);
+            console.error('[Settings] 查看日志失败:', error);
           }
         })
       );

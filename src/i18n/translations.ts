@@ -41,6 +41,7 @@ export interface Translation {
     similarityThreshold: { name: string; desc: string };
     minAiScore: { name: string; desc: string };
     maxLinksPerNote: { name: string; desc: string };
+    recalibrateLinks: { name: string; desc: string };
     useCustomScoringPrompt: { name: string; desc: string };
     customScoringPrompt: { name: string; desc: string };
     restoreScoringPrompt: { name: string; desc: string };
@@ -56,6 +57,7 @@ export interface Translation {
     showStatistics: { name: string; desc: string };
     cancelOperation: { name: string; desc: string };
     restoreDefaults: { name: string; desc: string };
+    viewLogs: { name: string; desc: string };
   };
   buttons: {
     restoreDefault: string;
@@ -63,16 +65,24 @@ export interface Translation {
     showStatistics: string;
     cancelOperation: string;
     restoreDefaults: string;
+    viewLogs: string;
+    confirmClearCache: string;
+    recalibrate: string;
+    recalibrating: string;
   };
   notices: {
     cacheClearSuccess: string;
     cacheClearFailed: string;
+    cacheClearCancelled: string;
     statisticsShown: string;
     statisticsFailed: string;
     cancelSuccess: string;
     cancelFailed: string;
     restoreDefaultsSuccess: string;
     restoreDefaultsFailed: string;
+    viewLogsFailed: string;
+    similarityTooLow: string;
+    recalibrateFailed: string;
 
     // 运行时提示
     starting: string;
@@ -91,6 +101,11 @@ export interface Translation {
     // 失败批次提示
     batchFailures: string;      // e.g. {count} batches failed
     failuresRecorded: string;   // 失败已记录到日志
+  };
+  dialogs: {
+    clearCacheTitle: string;
+    clearCacheMessage: string;
+    clearCacheConfirmPlaceholder: string;
   };
   placeholders: {
     jinaApiKey: string;
@@ -189,7 +204,7 @@ export const translations: Record<Language, Translation> = {
       },
       similarityThreshold: {
         name: 'Jina Similarity Threshold',
-        desc: 'Minimum cosine similarity for considering note pairs (0.0 to 1.0)',
+        desc: 'Minimum cosine similarity for note pairs (minimum recommended: 0.7). Lower values significantly increase API costs by generating more candidate pairs for LLM scoring.',
       },
       minAiScore: {
         name: 'Minimum AI Score for Link Insertion',
@@ -198,6 +213,10 @@ export const translations: Record<Language, Translation> = {
       maxLinksPerNote: {
         name: 'Maximum Links per Note',
         desc: 'Maximum number of suggested links to insert in each note (1 to 50)',
+      },
+      recalibrateLinks: {
+        name: 'Recalibrate Links',
+        desc: 'After modifying the thresholds above, click this button to apply the new configuration to all notes. Will not regenerate embeddings or re-score, only re-insert/remove links based on new thresholds.',
       },
       useCustomScoringPrompt: {
         name: 'Use Custom Prompt',
@@ -259,6 +278,10 @@ export const translations: Record<Language, Translation> = {
         name: 'Restore Default Settings',
         desc: 'Reset all settings to their default values (API keys will be preserved)',
       },
+      viewLogs: {
+        name: 'View Error Logs',
+        desc: 'Open the folder containing error log files for debugging',
+      },
     },
     buttons: {
       restoreDefault: 'Restore Default',
@@ -266,16 +289,24 @@ export const translations: Record<Language, Translation> = {
       showStatistics: 'Show Statistics',
       cancelOperation: 'Cancel Operation',
       restoreDefaults: 'Restore All Defaults',
+      viewLogs: 'View Logs',
+      confirmClearCache: 'Confirm',
+      recalibrate: 'Recalibrate Now',
+      recalibrating: 'Recalibrating...',
     },
     notices: {
       cacheClearSuccess: '✅ Cache cleared successfully',
       cacheClearFailed: '❌ Failed to clear cache',
+      cacheClearCancelled: 'Cache clear operation cancelled',
       statisticsShown: '✅ Statistics printed to console (Ctrl+Shift+I)',
       statisticsFailed: '❌ Failed to show statistics',
       cancelSuccess: '✅ Cancellation requested',
       cancelFailed: '❌ Failed to cancel operation',
       restoreDefaultsSuccess: '✅ All settings restored to defaults',
       restoreDefaultsFailed: '❌ Failed to restore defaults',
+      viewLogsFailed: '❌ Failed to open log folder',
+      similarityTooLow: '⚠️ Values below 0.7 are not recommended: will significantly increase the number of pairs to score, wasting API tokens',
+      recalibrateFailed: '❌ Link recalibration failed. Please check console for error details.',
 
       // Runtime notices
       starting: 'Starting process...',
@@ -294,6 +325,11 @@ export const translations: Record<Language, Translation> = {
       // Batch failures
       batchFailures: '⚠️ {count} batches failed',
       failuresRecorded: 'Failures have been logged. Click "View Failed Operations" to retry.',
+    },
+    dialogs: {
+      clearCacheTitle: 'Clear Cache Confirmation',
+      clearCacheMessage: 'This will delete all cached embeddings, scores, and index data. This action cannot be undone.\n\nTo confirm, please type "Clear Cache" below:',
+      clearCacheConfirmPlaceholder: 'Type "Clear Cache" to confirm',
     },
     placeholders: {
       jinaApiKey: 'Enter your API key',
@@ -390,7 +426,7 @@ export const translations: Record<Language, Translation> = {
       },
       similarityThreshold: {
         name: 'Jina 相似度阈值',
-        desc: '考虑笔记对的最小余弦相似度（0.0 到 1.0）',
+        desc: '笔记对的最低余弦相似度（最低建议值：0.7）。更低的值会显著增加需要 LLM 评分的候选配对数量，大幅增加 API 成本。',
       },
       minAiScore: {
         name: '链接插入的最小 AI 分数',
@@ -399,6 +435,10 @@ export const translations: Record<Language, Translation> = {
       maxLinksPerNote: {
         name: '每篇笔记的最大链接数',
         desc: '每篇笔记中插入的建议链接的最大数量（1 到 50）',
+      },
+      recalibrateLinks: {
+        name: '重新校准链接',
+        desc: '修改上述阈值后，点击此按钮应用新配置到所有笔记。不会重新生成 embedding 或重新评分，只会根据新阈值重新插入/删除链接。',
       },
       useCustomScoringPrompt: {
         name: '使用自定义提示词',
@@ -460,6 +500,10 @@ export const translations: Record<Language, Translation> = {
         name: '恢复默认设置',
         desc: '将所有设置重置为默认值（API 密钥将被保留）',
       },
+      viewLogs: {
+        name: '查看错误日志',
+        desc: '打开包含错误日志文件的文件夹以进行调试',
+      },
     },
     buttons: {
       restoreDefault: '恢复默认',
@@ -467,16 +511,24 @@ export const translations: Record<Language, Translation> = {
       showStatistics: '显示统计信息',
       cancelOperation: '取消操作',
       restoreDefaults: '恢复所有默认设置',
+      viewLogs: '查看日志',
+      confirmClearCache: '确认',
+      recalibrate: '立即校准',
+      recalibrating: '校准中...',
     },
     notices: {
       cacheClearSuccess: '✅ 缓存清除成功',
       cacheClearFailed: '❌ 清除缓存失败',
+      cacheClearCancelled: '缓存清除操作已取消',
       statisticsShown: '✅ 统计信息已打印到控制台 (Ctrl+Shift+I)',
       statisticsFailed: '❌ 显示统计信息失败',
       cancelSuccess: '✅ 已请求取消',
       cancelFailed: '❌ 取消操作失败',
       restoreDefaultsSuccess: '✅ 所有设置已恢复为默认值',
       restoreDefaultsFailed: '❌ 恢复默认设置失败',
+      viewLogsFailed: '❌ 打开日志文件夹失败',
+      similarityTooLow: '⚠️ 不建议低于 0.7：会大幅增加需要评分的配对数量，浪费 API token',
+      recalibrateFailed: '❌ 链接校准失败，请查看控制台错误信息',
 
       // 运行时提示
       starting: '开始处理...',
@@ -495,6 +547,11 @@ export const translations: Record<Language, Translation> = {
       // 失败批次提示
       batchFailures: '⚠️ {count} 个批次失败',
       failuresRecorded: '失败已记录到日志。点击"查看失败的操作"可重试。',
+    },
+    dialogs: {
+      clearCacheTitle: '清除缓存确认',
+      clearCacheMessage: '这将删除所有缓存的嵌入、分数和索引数据。此操作无法撤消。\n\n为确认操作，请在下方输入"清除缓存"：',
+      clearCacheConfirmPlaceholder: '输入"清除缓存"以确认',
     },
     placeholders: {
       jinaApiKey: '请输入您的 API 密钥',

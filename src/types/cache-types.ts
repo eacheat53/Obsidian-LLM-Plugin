@@ -154,6 +154,9 @@ export interface FailedOperation {
 
     /** 批次中的项目 (note_ids 或 pair_keys) */
     items: string[];
+
+    /** 人类可读的显示名称（文件路径），用于日志查看 */
+    display_items?: string[];
   };
 
   /** 错误信息 */

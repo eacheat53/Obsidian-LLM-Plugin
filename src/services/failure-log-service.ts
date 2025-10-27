@@ -94,6 +94,7 @@ export class FailureLogService {
       batch_number: number;
       total_batches: number;
       items: string[];
+      display_items?: string[];
     };
     error: {
       message: string;
@@ -108,7 +109,12 @@ export class FailureLogService {
       id: this.generateId(),
       timestamp: Date.now(),
       operation_type: params.operation_type,
-      batch_info: params.batch_info,
+      batch_info: {
+        batch_number: params.batch_info.batch_number,
+        total_batches: params.batch_info.total_batches,
+        items: params.batch_info.items,
+        display_items: params.batch_info.display_items,
+      },
       error: params.error,
       retry_count: 0,
       resolved: false,
@@ -266,6 +272,77 @@ export class FailureLogService {
 
     await this.saveLog(emptyLog);
     console.log('[Failure Log] 已清除所有失败记录');
+  }
+
+  /**
+   * 获取所有失败操作中涉及的唯一笔记 ID 集合
+   * 用于智能重试：即使 hash 未改变，也重新处理这些笔记
+   *
+   * @param onlyUnresolved - 是否只返回未解决的失败操作中的笔记 ID
+   * @returns 涉及失败操作的笔记 ID 集合
+   */
+  async getFailedNoteIds(onlyUnresolved: boolean = true): Promise<Set<string>> {
+    const log = await this.loadLog();
+    const noteIds = new Set<string>();
+
+    const operations = onlyUnresolved
+      ? log.operations.filter(op => !op.resolved)
+      : log.operations;
+
+    for (const op of operations) {
+      // 从 items 中提取笔记 ID
+      for (const item of op.batch_info.items) {
+        if (op.operation_type === 'scoring') {
+          // 对于评分操作，item 格式为 "uuid1:uuid2"
+          const [noteId1, noteId2] = item.split(':');
+          if (noteId1) noteIds.add(noteId1);
+          if (noteId2) noteIds.add(noteId2);
+        } else {
+          // 对于嵌入和标签操作，item 就是 note_id
+          noteIds.add(item);
+        }
+      }
+    }
+
+    return noteIds;
+  }
+
+  /**
+   * 获取指定类型失败操作中涉及的唯一笔记 ID 集合
+   * 用于按类型重试失败操作
+   *
+   * @param operationType - 操作类型（embedding/scoring/tagging）
+   * @param onlyUnresolved - 是否只返回未解决的失败操作中的笔记 ID
+   * @returns 涉及指定类型失败操作的笔记 ID 集合
+   */
+  async getFailedNoteIdsByType(
+    operationType: FailedOperationType,
+    onlyUnresolved: boolean = true
+  ): Promise<Set<string>> {
+    const log = await this.loadLog();
+    const noteIds = new Set<string>();
+
+    const operations = (onlyUnresolved
+      ? log.operations.filter(op => !op.resolved)
+      : log.operations
+    ).filter(op => op.operation_type === operationType);
+
+    for (const op of operations) {
+      // 从 items 中提取笔记 ID
+      for (const item of op.batch_info.items) {
+        if (operationType === 'scoring') {
+          // 对于评分操作，item 格式为 "uuid1:uuid2"
+          const [noteId1, noteId2] = item.split(':');
+          if (noteId1) noteIds.add(noteId1);
+          if (noteId2) noteIds.add(noteId2);
+        } else {
+          // 对于嵌入和标签操作，item 就是 note_id
+          noteIds.add(item);
+        }
+      }
+    }
+
+    return noteIds;
   }
 
   /**

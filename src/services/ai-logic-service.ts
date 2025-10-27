@@ -217,10 +217,6 @@ export class AILogicService {
    * @returns 带有 AI 分数的配对结果
    */
   async scorePairs(pairs: NotePairScore[], shouldCancel?: () => boolean): Promise<NotePairScore[]> {
-    if (pairs.length === 0) {
-      return [];
-    }
-
     if (this.settings.enable_debug_logging) {
       console.log(`[AI Logic] Scoring ${pairs.length} pairs in batches of ${this.settings.batch_size_scoring}`);
     }
@@ -230,19 +226,72 @@ export class AILogicService {
       throw new Error('Master index not loaded');
     }
 
+    // ✅ 获取失败集合中的评分失败操作，强制重新评分
+    let pairsToScore = [...pairs];
+    if (this.failureLogService) {
+      const failedOps = await this.failureLogService.getUnresolvedFailures();
+      const scoringFailures = failedOps.filter(op => op.operation_type === 'scoring');
+
+      if (scoringFailures.length > 0) {
+        console.log(`[AI Logic] 发现 ${scoringFailures.length} 个失败的评分操作，将强制重新评分`);
+
+        // 从失败操作中提取笔记对
+        const failedPairKeys = new Set<string>();
+        for (const op of scoringFailures) {
+          for (const item of op.batch_info.items) {
+            failedPairKeys.add(item); // item格式: "uuid1:uuid2"
+          }
+        }
+
+        // 将失败的笔记对添加到待评分列表（即使它们已经有分数）
+        for (const pairKey of failedPairKeys) {
+          const [noteId1, noteId2] = pairKey.split(':');
+
+          // 检查是否已经在待评分列表中
+          const alreadyIncluded = pairsToScore.some(
+            p => (p.note_id_1 === noteId1 && p.note_id_2 === noteId2) ||
+                 (p.note_id_1 === noteId2 && p.note_id_2 === noteId1)
+          );
+
+          if (!alreadyIncluded) {
+            // 从masterIndex获取现有分数（可能是旧的/失败的）
+            const existingScore = masterIndex.scores[pairKey];
+            if (existingScore) {
+              pairsToScore.push(existingScore);
+            } else {
+              // 如果masterIndex中没有，创建一个基本的配对
+              pairsToScore.push({
+                note_id_1: noteId1,
+                note_id_2: noteId2,
+                similarity_score: 0.5, // 默认值，会被重新计算
+                ai_score: 0,
+                last_scored: 0,
+              });
+            }
+          }
+        }
+
+        console.log(`[AI Logic] 总共需要评分 ${pairsToScore.length} 个笔记对（包含 ${failedPairKeys.size} 个失败重试）`);
+      }
+    }
+
+    if (pairsToScore.length === 0) {
+      return [];
+    }
+
     // 按批次处理
     const batchSize = this.settings.batch_size_scoring;
     const scoredPairs: NotePairScore[] = [];
-    const totalBatches = Math.ceil(pairs.length / batchSize);
+    const totalBatches = Math.ceil(pairsToScore.length / batchSize);
     let failedBatchCount = 0;
 
-    for (let i = 0; i < pairs.length; i += batchSize) {
+    for (let i = 0; i < pairsToScore.length; i += batchSize) {
       if (shouldCancel && shouldCancel()) {
         console.warn('[AI Logic] 评分已被取消');
         throw new Error('Task cancelled by user');
       }
 
-      const batch = pairs.slice(i, i + batchSize);
+      const batch = pairsToScore.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
 
       try {
@@ -308,6 +357,28 @@ export class AILogicService {
         await this.cacheService.saveMasterIndex(masterIndex);
         this.cacheService.setMasterIndex(masterIndex);
 
+        // ✅ 成功后删除失败集合中的相关记录
+        if (this.failureLogService) {
+          const batchPairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
+          const failedOps = await this.failureLogService.getUnresolvedFailures();
+
+          for (const op of failedOps) {
+            if (op.operation_type === 'scoring') {
+              // 检查这个失败操作中的笔记对是否在当前成功的批次中
+              const hasSuccessfulPairs = op.batch_info.items.some(item =>
+                batchPairKeys.includes(item)
+              );
+
+              if (hasSuccessfulPairs) {
+                await this.failureLogService.deleteFailure(op.id);
+                if (this.settings.enable_debug_logging) {
+                  console.log(`[AI Logic] 已从失败集合中删除评分操作: ${op.id}`);
+                }
+              }
+            }
+          }
+        }
+
         if (this.settings.enable_debug_logging) {
           console.log(`[AI Logic] Scored batch ${batchNumber}/${totalBatches} (saved to disk)`);
         }
@@ -315,18 +386,43 @@ export class AILogicService {
       } catch (error) {
         failedBatchCount++;
         const err = error as Error;
+        const errorMessage = err.message || String(error);
 
-        console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} failed:`, err.message);
+        // 检查是否是连接关闭错误
+        const isConnectionClosed = errorMessage.includes('ERR_CONNECTION_CLOSED') ||
+                                   errorMessage.includes('connection closed') ||
+                                   errorMessage.includes('socket hang up');
+
+        if (isConnectionClosed) {
+          console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} 失败：连接被关闭`);
+          console.error(`[AI Logic] 这通常是由于请求体过大或请求超时导致的`);
+          console.error(`[AI Logic] 建议：`);
+          console.error(`  1. 减小批处理大小（当前: ${this.settings.batch_size_scoring}，建议: ${Math.max(1, Math.floor(this.settings.batch_size_scoring / 2))}）`);
+          console.error(`  2. 减小 llm_scoring_max_chars（当前: ${this.settings.llm_scoring_max_chars}，建议: ${Math.max(500, Math.floor(this.settings.llm_scoring_max_chars / 2))}）`);
+          console.error(`  3. 检查网络连接是否稳定`);
+        } else {
+          console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} failed:`, errorMessage);
+        }
 
         // ✅ 记录失败批次到日志
         if (this.failureLogService) {
           const pairKeys = batch.map(p => `${p.note_id_1}:${p.note_id_2}`);
+
+          // 获取文件路径用于可读日志
+          const masterIndex = this.cacheService.getMasterIndex();
+          const displayItems = batch.map(p => {
+            const path1 = masterIndex?.notes[p.note_id_1]?.file_path || p.note_id_1;
+            const path2 = masterIndex?.notes[p.note_id_2]?.file_path || p.note_id_2;
+            return `${path1} <-> ${path2}`;
+          });
+
           await this.failureLogService.recordFailure({
             operation_type: 'scoring',
             batch_info: {
               batch_number: batchNumber,
               total_batches: totalBatches,
               items: pairKeys,
+              display_items: displayItems,
             },
             error: {
               message: err.message,
@@ -369,31 +465,68 @@ export class AILogicService {
    *
    * @param noteIds - 需要生成标签的笔记 ID 列表
    * @param shouldCancel - 取消检查函数
+   * @param onBatchComplete - 批次完成回调，用于立即写入YAML（可选）
    * @returns note_id -> 生成标签 的映射
    */
-  async generateTagsBatch(noteIds: NoteId[], shouldCancel?: () => boolean): Promise<Map<NoteId, string[]>> {
+  async generateTagsBatch(
+    noteIds: NoteId[],
+    shouldCancel?: () => boolean,
+    onBatchComplete?: (batchResults: Map<NoteId, string[]>) => Promise<void>
+  ): Promise<Map<NoteId, string[]>> {
     const masterIndex = this.cacheService.getMasterIndex();
     if (!masterIndex) {
       throw new Error('Master index not loaded');
     }
 
+    if (this.settings.enable_debug_logging) {
+      console.log(`[AI Logic] Generating tags for ${noteIds.length} notes`);
+    }
+
+    // ✅ 获取失败集合中的标签失败操作，强制重新生成
+    let noteIdsToTag = [...noteIds];
+    if (this.failureLogService) {
+      const failedOps = await this.failureLogService.getUnresolvedFailures();
+      const taggingFailures = failedOps.filter(op => op.operation_type === 'tagging');
+
+      if (taggingFailures.length > 0) {
+        console.log(`[AI Logic] 发现 ${taggingFailures.length} 个失败的标签操作，将强制重新生成`);
+
+        // 从失败操作中提取笔记ID
+        const failedNoteIds = new Set<string>();
+        for (const op of taggingFailures) {
+          for (const item of op.batch_info.items) {
+            failedNoteIds.add(item); // item就是note_id
+          }
+        }
+
+        // 将失败的笔记ID添加到待标签列表（即使它们已经有标签）
+        for (const noteId of failedNoteIds) {
+          if (!noteIdsToTag.includes(noteId)) {
+            noteIdsToTag.push(noteId);
+          }
+        }
+
+        console.log(`[AI Logic] 总共需要生成标签的笔记 ${noteIdsToTag.length} 个（包含 ${failedNoteIds.size} 个失败重试）`);
+      }
+    }
+
     const resultMap = new Map<NoteId, string[]>();
     const batchSize = this.settings.batch_size_tagging;
-    const totalBatches = Math.ceil(noteIds.length / batchSize);
+    const totalBatches = Math.ceil(noteIdsToTag.length / batchSize);
     let failedBatchCount = 0;
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[AI Logic] Generating tags for ${noteIds.length} notes in ${totalBatches} batches`);
+      console.log(`[AI Logic] Processing ${noteIdsToTag.length} notes in ${totalBatches} batches`);
     }
 
     // 按批次处理
-    for (let i = 0; i < noteIds.length; i += batchSize) {
+    for (let i = 0; i < noteIdsToTag.length; i += batchSize) {
       if (shouldCancel && shouldCancel()) {
         console.warn('[AI Logic] 标签生成已被取消');
         throw new Error('Task cancelled by user');
       }
 
-      const batch = noteIds.slice(i, i + batchSize);
+      const batch = noteIdsToTag.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
 
       try {
@@ -444,10 +577,12 @@ export class AILogicService {
         for (const result of response.results) {
           resultMap.set(result.note_id, result.tags);
 
-          // ✅ 立即更新 masterIndex
+          // ✅ 立即更新 masterIndex（但不设置 tags_generated_at）
+          // tags_generated_at 只有在成功写入 front-matter 后才设置
           if (masterIndex.notes[result.note_id]) {
             masterIndex.notes[result.note_id].tags = result.tags;
-            masterIndex.notes[result.note_id].tags_generated_at = Date.now();
+            // 注意：不在这里设置 tags_generated_at，因为还没写入文件
+            // tags_generated_at 将在 batchInsertTagsWorkflow 写入 front-matter 后设置
           }
         }
 
@@ -455,24 +590,76 @@ export class AILogicService {
         await this.cacheService.saveMasterIndex(masterIndex);
         this.cacheService.setMasterIndex(masterIndex);
 
+        // ✅ 成功后删除失败集合中的相关记录
+        if (this.failureLogService) {
+          const failedOps = await this.failureLogService.getUnresolvedFailures();
+
+          for (const op of failedOps) {
+            if (op.operation_type === 'tagging') {
+              // 检查这个失败操作中的笔记ID是否在当前成功的批次中
+              const hasSuccessfulNotes = op.batch_info.items.some(item =>
+                batch.includes(item)
+              );
+
+              if (hasSuccessfulNotes) {
+                await this.failureLogService.deleteFailure(op.id);
+                if (this.settings.enable_debug_logging) {
+                  console.log(`[AI Logic] 已从失败集合中删除标签操作: ${op.id}`);
+                }
+              }
+            }
+          }
+        }
+
         if (this.settings.enable_debug_logging) {
           console.log(`[AI Logic] Tagged batch ${batchNumber}/${totalBatches} (${response.results.length} notes, saved to disk)`);
+        }
+
+        // ✅ 调用批次完成回调（用于立即写入YAML）
+        if (onBatchComplete) {
+          const batchResults = new Map<NoteId, string[]>();
+          for (const result of response.results) {
+            batchResults.set(result.note_id, result.tags);
+          }
+          await onBatchComplete(batchResults);
         }
 
       } catch (error) {
         failedBatchCount++;
         const err = error as Error;
+        const errorMessage = err.message || String(error);
 
-        console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} failed:`, err.message);
+        // 检查是否是连接关闭错误
+        const isConnectionClosed = errorMessage.includes('ERR_CONNECTION_CLOSED') ||
+                                   errorMessage.includes('connection closed') ||
+                                   errorMessage.includes('socket hang up');
+
+        if (isConnectionClosed) {
+          console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} 失败：连接被关闭`);
+          console.error(`[AI Logic] 这通常是由于请求体过大或请求超时导致的`);
+          console.error(`[AI Logic] 建议：`);
+          console.error(`  1. 减小批处理大小（当前: ${this.settings.batch_size_tagging}，建议: ${Math.max(1, Math.floor(this.settings.batch_size_tagging / 2))}）`);
+          console.error(`  2. 减小 llm_tagging_max_chars（当前: ${this.settings.llm_tagging_max_chars}，建议: ${Math.max(500, Math.floor(this.settings.llm_tagging_max_chars / 2))}）`);
+          console.error(`  3. 检查网络连接是否稳定`);
+        } else {
+          console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} failed:`, errorMessage);
+        }
 
         // ✅ 记录失败批次到日志
         if (this.failureLogService) {
+          // 获取文件路径用于可读日志
+          const masterIndex = this.cacheService.getMasterIndex();
+          const displayItems = batch.map(noteId => {
+            return masterIndex?.notes[noteId]?.file_path || noteId;
+          });
+
           await this.failureLogService.recordFailure({
             operation_type: 'tagging',
             batch_info: {
               batch_number: batchNumber,
               total_batches: totalBatches,
               items: batch,
+              display_items: displayItems,
             },
             error: {
               message: err.message,
