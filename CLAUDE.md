@@ -43,6 +43,42 @@ npm install
 
 **Build outputs**: `main.js`, `manifest.json`, `styles.css` (ready for Obsidian plugin directory)
 
+## Recent Updates (2025-10-28)
+
+### Edge Case Fixes and Robustness Improvements
+
+A comprehensive edge case audit was conducted, resulting in 10 critical fixes across high/medium/low priority categories. All fixes have been implemented, tested, and documented.
+
+**High Priority (5/5 completed)**:
+1. ✅ **note_id Type Tolerance** - Auto-convert numbers to strings
+2. ✅ **CRLF/LF Support** - Handle both Windows and Unix line endings
+3. ✅ **YAML Error Notification** - Collect and display parsing errors to users
+4. ✅ **HASH_BOUNDARY Auto-completion** - Prevent infinite reprocessing loops
+5. ✅ **Empty Front-matter Support** - Handle `---\n---\n` format
+
+**Medium Priority (3/3 completed)**:
+6. ✅ **File Rename Monitoring** - Auto-update cache when files are renamed
+7. ✅ **File Delete Cleanup** - Auto-clean cache when files are deleted
+8. ✅ **Broken Link Cleanup** - Remove ledger entries for deleted notes
+
+**Low Priority (2/2 completed)**:
+9. ✅ **Cache Health Check Tool** - Non-destructive diagnostics
+10. ✅ **Manual Cleanup Tool** - Remove orphaned data on demand
+
+**Key Improvements**:
+- **Cross-platform compatibility**: Works seamlessly on Windows, Mac, Linux
+- **User visibility**: YAML errors now clearly notified instead of silent failures
+- **Real-time sync**: Cache automatically stays in sync with vault changes
+- **Maintenance tools**: Health check and cleanup accessible from ribbon menu
+- **Robustness**: Handles edge cases that previously caused silent failures
+
+**Documentation**:
+- `EDGE_CASES_AUDIT.md` - Complete edge case analysis (11KB)
+- `FIXES_SUMMARY.md` - High priority fixes details (7.1KB)
+- `MEDIUM_LOW_PRIORITY_FIXES.md` - Medium/low priority fixes (9.3KB)
+
+**Testing**: All fixes verified with comprehensive test scripts. Build passes with no errors.
+
 ## Architecture Overview
 
 ### Service-Oriented Design
@@ -458,6 +494,177 @@ From `src/utils/error-classifier.ts`:
 
 Retry: exponential backoff (1s → 2s → 4s)
 
+### 7. HASH_BOUNDARY Auto-Completion (Prevents Infinite Loops)
+
+**Problem**: If user deletes the `<!-- HASH_BOUNDARY -->` marker, the plugin will hash the entire file (including generated links), causing an infinite reprocessing loop.
+
+**Solution** (`src/services/note-processor.ts:97-111`):
+```typescript
+async calculateContentHash(file: TFile): Promise<ContentHash> {
+  const content = await this.app.vault.read(file);
+
+  // Auto-add missing HASH_BOUNDARY
+  if (!content.includes('<!-- HASH_BOUNDARY -->')) {
+    if (this.settings.enable_debug_logging) {
+      console.log(`[Note Processor] 自动添加 HASH_BOUNDARY 到 ${file.path}`);
+    }
+    const newContent = content.replace(/\n*$/, '') + '\n<!-- HASH_BOUNDARY -->\n';
+    await this.app.vault.modify(file, newContent);
+  }
+
+  const mainContent = await this.extractMainContent(file);
+  return await calculateContentHash(mainContent);
+}
+```
+
+**Benefits**:
+- ✅ Prevents infinite reprocessing when marker is accidentally deleted
+- ✅ Silent auto-fix (only logs in debug mode)
+- ✅ Idempotent (safe to call multiple times)
+
+### 8. File System Event Monitoring (Cache Consistency)
+
+**Problem**: When users rename or delete notes outside workflows, cache becomes stale.
+
+**Solution** (`src/main.ts:1507-1621`):
+
+**Event registration**:
+```typescript
+private registerFileSystemEvents(): void {
+  // Monitor file renames
+  this.registerEvent(
+    this.app.vault.on('rename', async (file, oldPath) => {
+      if (file instanceof TFile && file.extension === 'md') {
+        await this.handleFileRename(file, oldPath);
+      }
+    })
+  );
+
+  // Monitor file deletions
+  this.registerEvent(
+    this.app.vault.on('delete', async (file) => {
+      if (file instanceof TFile && file.extension === 'md') {
+        await this.handleFileDelete(file);
+      }
+    })
+  );
+}
+```
+
+**Rename handler** (updates file path in cache):
+```typescript
+private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
+  const masterIndex = this.cacheService.getMasterIndex();
+  if (!masterIndex) return;
+
+  // Find note by old path and update
+  for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+    if (meta.file_path === oldPath) {
+      meta.file_path = file.path;
+      await this.cacheService.saveMasterIndex(masterIndex);
+      break;
+    }
+  }
+}
+```
+
+**Delete handler** (comprehensive cleanup):
+```typescript
+private async handleFileDelete(file: TFile): Promise<void> {
+  // 1. Delete note metadata
+  delete masterIndex.notes[deletedNoteId];
+
+  // 2. Delete related scores
+  for (const key in masterIndex.scores) {
+    if (key.includes(deletedNoteId)) {
+      delete masterIndex.scores[key];
+    }
+  }
+
+  // 3. Clean broken links in ledger
+  if (masterIndex.link_ledger) {
+    const ledger = masterIndex.link_ledger as Record<NoteId, NoteId[]>;
+    delete ledger[deletedNoteId];  // Remove as source
+
+    // Remove from target lists
+    for (const [sourceId, targets] of Object.entries(ledger)) {
+      ledger[sourceId] = targets.filter(id => id !== deletedNoteId);
+    }
+  }
+
+  // 4. Delete embedding file
+  await this.cacheService.deleteEmbedding(deletedNoteId);
+}
+```
+
+**When automatic cleanup works**:
+- ✅ Deleting files in Obsidian
+- ✅ Renaming files in Obsidian
+- ✅ Moving files between folders in Obsidian
+
+**When manual cleanup needed** (see Cache Maintenance Tools below):
+- ❌ Deleting files via external tools (OS file manager, Git)
+- ❌ Batch operations via shell scripts
+- ❌ Sync conflicts that remove files
+
+**Benefits**:
+- Real-time cache consistency
+- No orphaned data accumulation during normal usage
+- Broken links automatically cleaned
+
+### 9. Cache Maintenance Tools (Manual Cleanup)
+
+**Added UI**: Sidebar menu → 🔍 Health Check / 🧹 Clean Orphaned Data
+
+**Health Check Workflow** (`src/main.ts:1733-1840`):
+Non-destructive diagnostics that report issues without modifying data.
+
+**Checks performed**:
+1. **Orphaned notes** - Files deleted but cache still contains data
+2. **Missing UUIDs** - Notes without `note_id` in front-matter
+3. **Missing HASH_BOUNDARY** - Notes missing the separator marker
+4. **Broken links** - Ledger entries pointing to deleted notes
+
+**Example report**:
+```
+⚠️ 发现 3 类问题:
+
+🔸 12 个孤立笔记（文件已删除但缓存仍存在）
+🔸 5 个笔记缺少 note_id
+🔸 8 个断链（指向不存在的笔记）
+
+建议：使用"清理孤立数据"功能修复
+```
+
+**Clean Orphaned Data Workflow** (`src/main.ts:1623-1731`):
+Destructive cleanup that removes all orphaned data.
+
+**Cleanup actions**:
+1. Scan vault for all existing files
+2. Identify notes in cache but not in vault
+3. Delete orphaned note metadata
+4. Delete related scores
+5. Delete orphaned embedding files
+6. Clean broken links in ledger
+
+**Result notification**:
+```
+✅ 清理完成:
+- 删除 15 个孤立笔记
+- 删除 15 个嵌入文件
+- 清理 42 个断链
+```
+
+**Recommended usage pattern**:
+```
+1. Run Health Check → See what's wrong
+2. Review the report → Decide if cleanup is needed
+3. Run Clean Orphaned Data → Fix all issues
+4. Re-run Health Check → Verify fix (should show "缓存健康状况良好")
+```
+
+**Implementation**: See `MEDIUM_LOW_PRIORITY_FIXES.md` for complete documentation.
+
 ## Common Gotchas
 
 ### 1. Forgetting to Rebuild Score Index
@@ -532,6 +739,95 @@ Both methods use the same underlying workflow and are instant (no API calls).
 
 **Implementation**: `LinkInjectorService._listTargetsFromPairs` filters pairs before selecting top N links, consistent with `AILogicService.filterByThresholds`.
 
+### 7. File System Event Limitations
+
+**Automatic cleanup works for**:
+- ✅ Renaming files in Obsidian
+- ✅ Deleting files in Obsidian
+- ✅ Moving files between folders in Obsidian
+
+**Manual cleanup required for**:
+- ❌ Deleting files via OS file manager (Finder, Explorer)
+- ❌ Batch operations via shell scripts
+- ❌ Git operations (checkout, pull, merge)
+- ❌ Sync conflicts that remove files
+- ❌ Third-party sync tools (Dropbox, iCloud)
+
+**When to use manual tools**:
+1. After using external tools to modify vault
+2. After Git operations that delete/rename files
+3. After resolving sync conflicts
+4. Periodic maintenance (monthly health check)
+
+**Best practice**:
+```
+1. External batch operation (e.g., git pull)
+2. Open Obsidian
+3. Click ribbon icon → 🔍 缓存健康检查
+4. Review report
+5. If issues found → 🧹 清理孤立数据
+6. Re-check → Should show "缓存健康状况良好"
+```
+
+### 8. Front-matter Parsing Edge Cases (Now Fixed)
+
+These edge cases are **no longer issues** as of 2025-10-28:
+
+**Previously problematic**:
+- ❌ Files starting with blank lines
+- ❌ Windows CRLF line endings (`\r\n`)
+- ❌ Empty front-matter (`---\n---\n`)
+- ❌ Numeric `note_id` values
+
+**Now handled automatically**:
+- ✅ Leading whitespace auto-trimmed
+- ✅ Both LF and CRLF supported
+- ✅ Empty front-matter recognized
+- ✅ Numeric `note_id` converted to string
+- ✅ YAML errors reported with actionable messages
+
+**If you still see parsing issues**:
+1. Check console for specific YAML error
+2. Verify front-matter syntax at yaml-online-parser.appspot.com
+3. Common mistakes: unquoted special chars, inconsistent indentation
+
+### 9. Syncing Content Hash (避免不必要的重新处理)
+
+当您只修改笔记的 front-matter（如添加 `created` 字段）而不改变正文内容时，可能触发不必要的 embedding 重新生成。这通常是因为编辑器自动调整了格式（空行数量、不可见字符等），导致 content hash 改变。
+
+**使用场景**：
+- 批量添加 front-matter 字段（如 `created`、`modified`、`tags`）
+- 使用格式化工具调整笔记格式
+- 明知正文内容未变，但 hash 改变了
+
+**解决方法**：
+1. 修改完 front-matter 后
+2. 点击侧边栏图标 → "同步内容 Hash（不重新生成 Embedding）"
+3. 等待同步完成（显示"✅ 已同步 N 个笔记的 Hash"）
+4. 下次运行智能模式时，这些笔记会被跳过
+
+**工作流程**：
+```
+扫描所有笔记
+  ↓
+重新计算当前 hash
+  ↓
+更新 masterIndex.notes[noteId].content_hash
+更新 masterIndex.notes[noteId].last_processed
+  ↓
+保存到磁盘
+  ↓
+不调用任何 API（Jina/LLM）
+不修改 embedding/scores/tags
+```
+
+**注意事项**：
+- ⚠️ 如果正文内容确实改变了，使用此功能会导致下次智能模式跳过该笔记
+- ⚠️ 若误用，可使用强制模式重新处理所有笔记
+- ✅ 适用于批量修改 front-matter 后快速同步 hash
+
+**Implementation**: `src/main.ts:syncHashWorkflow()`
+
 ## Key Files Reference
 
 ### Core Services
@@ -549,7 +845,12 @@ Both methods use the same underlying workflow and are instant (no API calls).
 
 ### UI Components
 - `src/ui/settings-tab.ts` - Settings panel with i18n support
-- `src/ui/sidebar-menu.ts` - Ribbon icon menu (3 actions, no "Hash Boundary" option)
+- `src/ui/sidebar-menu.ts` - Ribbon icon menu (5 actions):
+  - ⚡ 一键执行（嵌入→打分→插链→打标签）
+  - 🔄 重新校准链接（应用新阈值）
+  - 🔁 同步内容 Hash
+  - 🔍 缓存健康检查 (NEW)
+  - 🧹 清理孤立数据 (NEW)
 - `src/ui/batch-tag-modal.ts` - Tag generation modal with folder picker
 
 ## Known Issues
@@ -569,13 +870,54 @@ Both methods use the same underlying workflow and are instant (no API calls).
 
 If `insertLinks()` fails for one note, entire batch aborts. Should wrap in try-catch and continue.
 
-### 3. Frontmatter Parser Limitations
+### 3. ~~Frontmatter Parser Limitations~~ → Front-matter Parser Robustness (Fixed)
 
-Custom YAML parser is intentionally basic:
-- ✅ Supports: strings, numbers, booleans, arrays
-- ❌ Does NOT support: nested objects, multi-line strings
+**Status**: Now uses `js-yaml` for robust parsing with comprehensive edge case handling.
 
-**Rationale**: Avoids js-yaml dependency (~30KB). Sufficient for `note_id` and `tags` fields.
+**Improvements implemented** (2025-10-28):
+- ✅ **CRLF/LF support**: Handles both Windows (`\r\n`) and Unix (`\n`) line endings
+- ✅ **Leading whitespace tolerance**: Auto-trims content before parsing
+- ✅ **Type coercion**: Automatically converts number `note_id` to string
+- ✅ **Empty front-matter**: Supports `---\n---\n` format
+- ✅ **Error reporting**: Returns `parseError` field instead of silent failure
+
+**Updated regex** (`src/utils/frontmatter-parser.ts:42`):
+```typescript
+// Before: /^---\n([\s\S]*?)\n---\n/
+// After:  /^---\r?\n([\s\S]*?)(\r?\n)?---\r?\n/
+//         ^^^^           ^^^^^^^^
+//         CRLF support   Empty FM support
+```
+
+**Type tolerance** (`src/utils/frontmatter-parser.ts:62-68`):
+```typescript
+// Automatically convert note_id to string
+if (data.note_id !== undefined && data.note_id !== null) {
+  data.note_id = String(data.note_id).trim();
+  if (data.note_id === '') {
+    delete data.note_id;  // Remove if empty
+  }
+}
+```
+
+**Error handling**:
+```typescript
+interface FrontMatterData {
+  data: Record<string, unknown>;
+  raw_yaml: string;
+  body: string;
+  exists: boolean;
+  parseError?: string;  // NEW: Error message if parsing fails
+}
+```
+
+**User notification** (`src/main.ts:1438-1442`):
+```
+⚠️ 3 个笔记因 YAML 错误被跳过
+请检查控制台日志
+```
+
+**Documentation**: See `FIXES_SUMMARY.md` for detailed test results.
 
 ## Performance Optimization Guidelines
 
@@ -641,11 +983,142 @@ Custom YAML parser is intentionally basic:
 
 ## Design Philosophy
 
-**Zero Runtime Dependencies**: No production npm dependencies
-- Custom YAML parser (no js-yaml)
-- Custom UUID generator (no uuid package)
-- Custom vector math (no numeric library)
+**Minimal Runtime Dependencies**: Only essential production dependencies
+- ✅ `js-yaml` - Robust YAML parsing with edge case handling (used as of 2025-10-28)
+- ✅ Custom UUID generator (no uuid package)
+- ✅ Custom vector math (no numeric library)
+- ✅ Custom HTTP client (no axios)
 
-**Why**: Reduces bundle size, improves load time, eliminates supply chain risks
+**Why js-yaml was added**:
+- Cross-platform compatibility (CRLF/LF)
+- Edge case handling (empty front-matter, leading whitespace)
+- Type tolerance (number to string conversion)
+- Better error messages for users
+- Industry-standard, well-tested library
 
-**Trade-off**: More maintenance, but justified for Obsidian plugin distribution
+**Trade-off**: ~30KB bundle size increase for significantly improved robustness and user experience. Justified by avoiding silent failures and supporting diverse user environments.
+
+**Overall philosophy**: Prefer custom implementations for simple tasks (UUID, vector math), use battle-tested libraries for complex parsing (YAML) where edge cases are numerous.
+
+## Edge Case Handling Reference
+
+This section documents all edge cases and their fixes. For complete implementation details, see the documentation files in the repository root.
+
+### Front-matter Parsing Edge Cases (All Fixed)
+
+**Issue 1: CRLF Line Endings**
+- **Problem**: Windows files with `\r\n` line endings failed to parse
+- **Fix**: Updated regex to `/^---\r?\n([\s\S]*?)(\r?\n)?---\r?\n/`
+- **Location**: `src/utils/frontmatter-parser.ts:42`
+- **Tested**: ✅ Both LF and CRLF files parse correctly
+
+**Issue 2: Leading Whitespace**
+- **Problem**: Files starting with blank lines failed to parse
+- **Fix**: Auto-trim content before parsing: `content.replace(/^\s*/, '')`
+- **Location**: `src/utils/frontmatter-parser.ts:37`
+- **Tested**: ✅ Files with leading whitespace parse correctly
+
+**Issue 3: note_id Type Mismatch**
+- **Problem**: Numeric note_id (e.g., `123456`) parsed as number, rejected by type check
+- **Fix**: Auto-convert to string: `String(data.note_id).trim()`
+- **Location**: `src/utils/frontmatter-parser.ts:62-68`
+- **Tested**: ✅ Number `123456` converts to string `"123456"`
+
+**Issue 4: Empty Front-matter**
+- **Problem**: `---\n---\n` format didn't match regex
+- **Fix**: Made middle newline optional: `(\r?\n)?` before closing `---`
+- **Location**: `src/utils/frontmatter-parser.ts:42`
+- **Tested**: ✅ Empty front-matter returns `exists: true`
+
+**Issue 5: Silent YAML Errors**
+- **Problem**: Parse errors caught but only logged, users unaware notes were skipped
+- **Fix**: Added `parseError` field to return value, collect in workflows
+- **Location**: `src/utils/frontmatter-parser.ts:25,80-88` + `src/main.ts:1438-1442`
+- **Result**: Users see `⚠️ N 个笔记因 YAML 错误被跳过` with details
+
+### HASH_BOUNDARY Edge Cases (All Fixed)
+
+**Issue 6: Missing Marker**
+- **Problem**: If user deletes `<!-- HASH_BOUNDARY -->`, hash includes generated links → infinite loop
+- **Fix**: Auto-add marker when missing in `calculateContentHash()`
+- **Location**: `src/services/note-processor.ts:97-111`
+- **Result**: Infinite reprocessing prevented automatically
+
+### Cache Consistency Edge Cases (All Fixed)
+
+**Issue 7: File Rename**
+- **Problem**: Renamed files had outdated `file_path` in cache
+- **Fix**: Event listener for `rename` event updates path
+- **Location**: `src/main.ts:1507-1556`
+- **Limitation**: Only works for renames in Obsidian (not external tools)
+
+**Issue 8: File Delete**
+- **Problem**: Deleted files left orphaned data in cache (notes, scores, embeddings, ledger)
+- **Fix**: Event listener for `delete` event cleans all related data
+- **Location**: `src/main.ts:1558-1621`
+- **Cleanup**: Deletes note metadata, scores, embedding file, ledger entries
+
+**Issue 9: Orphaned Data Accumulation**
+- **Problem**: External tools (Git, OS file manager) bypass event listeners
+- **Fix**: Manual cleanup tool accessible from ribbon menu
+- **Location**: `src/main.ts:1623-1731`
+- **UI**: Ribbon menu → 🧹 清理孤立数据
+
+**Issue 10: Cache Health Monitoring**
+- **Problem**: No way to detect orphaned data, broken links, missing UUIDs
+- **Fix**: Non-destructive health check tool
+- **Location**: `src/main.ts:1733-1840`
+- **UI**: Ribbon menu → 🔍 缓存健康检查
+
+### Testing Coverage
+
+All edge cases have been tested with dedicated test scripts:
+
+```bash
+# Run all edge case tests
+node test-edge-cases.js     # Comprehensive edge cases
+node test-fixes.js          # All 6 high-priority fixes
+node test-empty-fm.js       # Empty front-matter debug
+node test-regex.js          # Regex pattern validation
+node test-parser-crlf.js    # CRLF line ending test
+```
+
+**Test results**: All tests passing ✅
+
+### When to Use Manual Tools
+
+**Use Health Check when**:
+- After Git operations (pull, merge, checkout)
+- After batch file operations via external tools
+- Monthly maintenance routine
+- Troubleshooting missing/broken links
+- Before running cleanup (to see what will be affected)
+
+**Use Clean Orphaned Data when**:
+- Health check reports orphaned notes
+- Sync conflicts have removed files
+- Vault migration/reorganization completed
+- After deleting files via OS file manager
+
+**Workflow recommendation**:
+```
+1. External operation (Git/OS tools)
+2. Open Obsidian
+3. Ribbon → 🔍 缓存健康检查
+4. Review report
+5. If issues: Ribbon → 🧹 清理孤立数据
+6. Re-check: Should show "缓存健康状况良好"
+```
+
+### Known Limitations
+
+**Automatic cleanup does NOT work for**:
+- Files deleted via OS file manager (Finder, Explorer, Nautilus)
+- Git operations (checkout, pull, merge, rebase)
+- Third-party sync tools (Dropbox, iCloud, Syncthing)
+- Batch shell scripts
+- Sync conflict resolutions
+
+**Why**: These operations bypass Obsidian's event system. Use manual tools after such operations.
+
+**Future consideration**: Watch filesystem directly (fs.watch) for external changes, but adds complexity and platform-specific issues.

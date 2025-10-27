@@ -238,8 +238,26 @@ export class CacheService {
   }
 
   /**
+   * 删除特定笔记的嵌入向量
+   * 修复问题6: 孤立数据清理
+   */
+  async deleteEmbedding(noteId: NoteId): Promise<void> {
+    const paths = this.getPaths();
+    const embeddingFile = `${paths.embeddings_dir}/${noteId}.json`;
+
+    try {
+      if (await this.fileExists(embeddingFile)) {
+        await this.deleteFile(embeddingFile);
+      }
+    } catch (error) {
+      console.error(`[Cache Service] 删除 ${noteId} 的嵌入失败:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * 清除所有缓存数据（索引和嵌入）
-   * 由设置中的“清除缓存”按钮使用
+   * 由设置中的"清除缓存"按钮使用
    */
   async clearCache(): Promise<void> {
     const paths = this.getPaths();

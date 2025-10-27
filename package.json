@@ -20,6 +20,7 @@
   "author": "eacheat53",
   "license": "MIT",
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
@@ -29,5 +30,8 @@
     "obsidian": "^1.4.0",
     "tslib": "^2.6.0",
     "typescript": "^5.2.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
   }
 }

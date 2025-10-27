@@ -16,6 +16,7 @@ import { ErrorLogger } from './utils/error-logger';
 import { SettingsTab } from './ui/settings-tab';
 import { SidebarMenuService } from './ui/sidebar-menu';
 import { NoteId, NotePairScore } from './types/index';
+import { parseFrontMatter } from './utils/frontmatter-parser';
 
 /**
  * 主插件类
@@ -56,6 +57,9 @@ export default class ObsidianLLMPlugin extends Plugin {
 
     // 注册功能区图标和菜单
     this.sidebarMenuService.registerRibbonIcon();
+
+    // 注册文件系统事件监听（修复问题5: 文件重命名/删除同步）
+    this.registerFileSystemEvents();
 
     // TODO: 注册命令 (T040-T043)
   }
@@ -1331,6 +1335,132 @@ export default class ObsidianLLMPlugin extends Plugin {
   }
 
   /**
+   * 同步内容 Hash 工作流
+   * 重新计算所有笔记的 content hash 并更新到 masterIndex，但不重新生成 embedding
+   * 适用于只修改 front-matter 而正文内容未变的场景，避免不必要的 API 调用
+   *
+   * @param targetPath - 要扫描的路径
+   */
+  async syncHashWorkflow(targetPath: string): Promise<void> {
+    try {
+      await this.taskManagerService.startTask('Sync Hash', async (updateProgress) => {
+        // 1. 加载主索引
+        const loadResult = await this.cacheService.loadMasterIndex({
+          detect_orphans: false,
+          create_if_missing: true
+        });
+
+        if (!loadResult.success) {
+          throw new Error('Failed to load master index');
+        }
+
+        const masterIndex = loadResult.index!;
+
+        // 2. 扫描 vault
+        updateProgress(10, 'Scanning vault...');
+        const files = await this.noteProcessorService.scanVault(targetPath);
+
+        if (files.length === 0) {
+          new Notice('未找到需要处理的文件');
+          return;
+        }
+
+        // 3. 处理每个文件
+        let syncedCount = 0;
+        let skippedCount = 0;
+        const yamlErrors: string[] = []; // 修复问题3: 收集 YAML 解析错误
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const progress = 10 + (i / files.length) * 80;
+          updateProgress(progress, `Syncing hash ${i + 1}/${files.length}`);
+
+          // 读取笔记内容并检查是否有 note_id（不修改文件）
+          const content = await this.app.vault.read(file);
+          const fm = parseFrontMatter(content);
+
+          // 修复问题3: 检测 YAML 解析错误
+          if (fm.parseError) {
+            yamlErrors.push(`${file.path}: ${fm.parseError}`);
+            skippedCount++;
+            if (this.settings.enable_debug_logging) {
+              console.log(`[Main] YAML 解析错误: ${file.path} - ${fm.parseError}`);
+            }
+            continue;
+          }
+
+          if (!fm.data.note_id || typeof fm.data.note_id !== 'string') {
+            // 跳过没有 note_id 的笔记
+            skippedCount++;
+            if (this.settings.enable_debug_logging) {
+              console.log(`[Main] 跳过没有 note_id 的笔记: ${file.path}`);
+            }
+            continue;
+          }
+
+          const noteId = fm.data.note_id as NoteId;
+
+          // 计算当前 hash
+          const contentHash = await this.noteProcessorService.calculateContentHash(file);
+
+          // 更新主索引
+          const existingNote = masterIndex.notes[noteId];
+          if (existingNote) {
+            // 更新现有笔记
+            existingNote.content_hash = contentHash;
+            existingNote.last_processed = Date.now();
+          } else {
+            // 创建新条目（通常不会发生）
+            masterIndex.notes[noteId] = {
+              note_id: noteId,
+              file_path: file.path,
+              content_hash: contentHash,
+              last_processed: Date.now(),
+              tags: [],
+              has_frontmatter: content.startsWith('---'),
+              has_hash_boundary: content.includes('<!-- HASH_BOUNDARY -->'),
+              has_links_section: content.includes('<!-- LINKS_START -->'),
+            };
+          }
+
+          syncedCount++;
+        }
+
+        // 4. 保存主索引
+        updateProgress(90, 'Saving master index...');
+        await this.cacheService.saveMasterIndex(masterIndex);
+        this.cacheService.setMasterIndex(masterIndex);
+
+        // 5. 显示成功通知
+        updateProgress(100, 'Done');
+
+        // 修复问题3: 通知用户 YAML 错误
+        if (yamlErrors.length > 0) {
+          const errorSummary = yamlErrors.slice(0, 3).join('\n');
+          const moreCount = yamlErrors.length > 3 ? ` (还有 ${yamlErrors.length - 3} 个)` : '';
+          new Notice(`⚠️ ${yamlErrors.length} 个笔记因 YAML 错误被跳过${moreCount}\n请检查控制台日志`, 10000);
+          console.error('[Main] YAML 解析错误汇总:\n' + yamlErrors.join('\n'));
+        }
+
+        if (skippedCount > 0) {
+          new Notice(`✅ 已同步 ${syncedCount} 个笔记的 Hash（跳过 ${skippedCount} 个笔记）`);
+        } else {
+          new Notice(`✅ 已同步 ${syncedCount} 个笔记的 Hash`);
+        }
+
+        if (this.settings.enable_debug_logging) {
+          console.log(`[Main] Sync hash completed: ${syncedCount} notes synced, ${skippedCount} notes skipped, ${yamlErrors.length} YAML errors`);
+        }
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('[Main] Sync hash workflow failed:', error);
+      new Notice(`❌ Hash 同步失败：${err.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * 向笔记添加 hash 边界标记
    */
   async addHashBoundaryWorkflow(): Promise<void> {
@@ -1366,6 +1496,345 @@ export default class ObsidianLLMPlugin extends Plugin {
       const err = error as Error;
       new Notice(`❌ Error: ${err.message}`);
       console.error('[Main] Add UUID failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 注册文件系统事件监听
+   * 修复问题5: 文件重命名/删除后同步缓存
+   */
+  private registerFileSystemEvents(): void {
+    // 监听文件重命名
+    this.registerEvent(
+      this.app.vault.on('rename', async (file, oldPath) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          await this.handleFileRename(file, oldPath);
+        }
+      })
+    );
+
+    // 监听文件删除
+    this.registerEvent(
+      this.app.vault.on('delete', async (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          await this.handleFileDelete(file);
+        }
+      })
+    );
+
+    if (this.settings.enable_debug_logging) {
+      console.log('[Main] 已注册文件系统事件监听');
+    }
+  }
+
+  /**
+   * 处理文件重命名
+   * 修复问题5: 更新 masterIndex 中的 file_path
+   */
+  private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
+    try {
+      const masterIndex = this.cacheService.getMasterIndex();
+      if (!masterIndex) return;
+
+      // 通过 oldPath 找到 note_id
+      for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+        if (meta.file_path === oldPath) {
+          // 更新路径
+          meta.file_path = file.path;
+          await this.cacheService.saveMasterIndex(masterIndex);
+
+          if (this.settings.enable_debug_logging) {
+            console.log(`[Main] 文件重命名: ${oldPath} -> ${file.path}`);
+          }
+          break;
+        }
+      }
+    } catch (error) {
+      console.error('[Main] 处理文件重命名失败:', error);
+    }
+  }
+
+  /**
+   * 处理文件删除
+   * 修复问题6/7: 清理缓存中的孤立数据和断链
+   */
+  private async handleFileDelete(file: TFile): Promise<void> {
+    try {
+      const masterIndex = this.cacheService.getMasterIndex();
+      if (!masterIndex) return;
+
+      // 通过 file.path 找到 note_id
+      let deletedNoteId: NoteId | null = null;
+      for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+        if (meta.file_path === file.path) {
+          deletedNoteId = noteId as NoteId;
+          break;
+        }
+      }
+
+      if (!deletedNoteId) return;
+
+      // 删除笔记记录
+      delete masterIndex.notes[deletedNoteId];
+
+      // 删除相关 scores
+      const scoreKeysToDelete: string[] = [];
+      for (const key in masterIndex.scores) {
+        if (key.includes(deletedNoteId)) {
+          scoreKeysToDelete.push(key);
+        }
+      }
+      for (const key of scoreKeysToDelete) {
+        delete masterIndex.scores[key];
+      }
+
+      // 清理 ledger 中指向该笔记的链接（修复问题7: 断链清理）
+      if (masterIndex.link_ledger) {
+        const ledger = masterIndex.link_ledger as Record<NoteId, NoteId[]>;
+
+        // 删除该笔记作为 source 的记录
+        delete ledger[deletedNoteId];
+
+        // 从其他笔记的 target 列表中删除该笔记
+        for (const [sourceId, targets] of Object.entries(ledger)) {
+          const filtered = targets.filter(id => id !== deletedNoteId);
+          if (filtered.length < targets.length) {
+            ledger[sourceId as NoteId] = filtered;
+          }
+        }
+      }
+
+      // 删除 embedding 文件
+      await this.cacheService.deleteEmbedding(deletedNoteId);
+
+      // 保存更新
+      await this.cacheService.saveMasterIndex(masterIndex);
+      this.cacheService.setMasterIndex(masterIndex);
+
+      if (this.settings.enable_debug_logging) {
+        console.log(`[Main] 已清理删除文件的数据: ${file.path} (${deletedNoteId})`);
+      }
+    } catch (error) {
+      console.error('[Main] 处理文件删除失败:', error);
+    }
+  }
+
+  /**
+   * 清理孤立数据工作流
+   * 修复问题6: 手动清理所有孤立笔记、嵌入和断链
+   */
+  async cleanOrphanedDataWorkflow(): Promise<void> {
+    try {
+      await this.taskManagerService.startTask('Clean Orphaned Data', async (updateProgress) => {
+        updateProgress(0, 'Loading cache...');
+        const masterIndex = this.cacheService.getMasterIndex();
+        if (!masterIndex) {
+          new Notice('❌ 无法加载缓存');
+          return;
+        }
+
+        // 获取当前 vault 中的所有文件路径
+        updateProgress(10, 'Scanning vault...');
+        const vaultFiles = this.app.vault.getMarkdownFiles();
+        const vaultPaths = new Set(vaultFiles.map(f => f.path));
+
+        // 找到孤立的笔记
+        updateProgress(20, 'Detecting orphaned notes...');
+        const orphanedNoteIds: NoteId[] = [];
+        for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+          if (!vaultPaths.has(meta.file_path)) {
+            orphanedNoteIds.push(noteId as NoteId);
+          }
+        }
+
+        if (orphanedNoteIds.length === 0) {
+          new Notice('✅ 未发现孤立数据');
+          return;
+        }
+
+        // 清理孤立笔记
+        updateProgress(40, `Cleaning ${orphanedNoteIds.length} orphaned notes...`);
+        let embeddingsDeleted = 0;
+        for (const noteId of orphanedNoteIds) {
+          // 删除 masterIndex 记录
+          delete masterIndex.notes[noteId];
+
+          // 删除相关 scores
+          const keysToDelete: string[] = [];
+          for (const key in masterIndex.scores) {
+            if (key.includes(noteId)) keysToDelete.push(key);
+          }
+          for (const key of keysToDelete) {
+            delete masterIndex.scores[key];
+          }
+
+          // 删除 embedding 文件
+          try {
+            await this.cacheService.deleteEmbedding(noteId);
+            embeddingsDeleted++;
+          } catch (error) {
+            // Embedding 文件可能已经不存在了
+            if (this.settings.enable_debug_logging) {
+              console.log(`[Main] Embedding 文件不存在: ${noteId}`);
+            }
+          }
+        }
+
+        // 清理 ledger 中的断链（修复问题7）
+        updateProgress(70, 'Cleaning broken links...');
+        let brokenLinksRemoved = 0;
+        if (masterIndex.link_ledger) {
+          const ledger = masterIndex.link_ledger as Record<NoteId, NoteId[]>;
+          const orphanedSet = new Set(orphanedNoteIds);
+
+          // 删除孤立笔记作为 source 的记录
+          for (const noteId of orphanedNoteIds) {
+            delete ledger[noteId];
+          }
+
+          // 从其他笔记的 target 列表中删除孤立笔记
+          for (const [sourceId, targets] of Object.entries(ledger)) {
+            const filtered = targets.filter(id => !orphanedSet.has(id));
+            const removed = targets.length - filtered.length;
+            if (removed > 0) {
+              ledger[sourceId as NoteId] = filtered;
+              brokenLinksRemoved += removed;
+            }
+          }
+        }
+
+        // 保存更新
+        updateProgress(90, 'Saving cache...');
+        await this.cacheService.saveMasterIndex(masterIndex);
+        this.cacheService.setMasterIndex(masterIndex);
+
+        updateProgress(100, 'Done');
+        new Notice(
+          `✅ 清理完成:\n` +
+          `- 删除 ${orphanedNoteIds.length} 个孤立笔记\n` +
+          `- 删除 ${embeddingsDeleted} 个嵌入文件\n` +
+          `- 清理 ${brokenLinksRemoved} 个断链`,
+          8000
+        );
+
+        if (this.settings.enable_debug_logging) {
+          console.log(`[Main] 孤立数据清理完成: ${orphanedNoteIds.length} notes, ${embeddingsDeleted} embeddings, ${brokenLinksRemoved} broken links`);
+        }
+      });
+    } catch (error) {
+      const err = error as Error;
+      new Notice(`❌ 清理失败: ${err.message}`);
+      console.error('[Main] Clean orphaned data failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 缓存健康检查工作流
+   * 检测各种潜在问题但不修改数据
+   */
+  async cacheHealthCheckWorkflow(): Promise<void> {
+    try {
+      await this.taskManagerService.startTask('Cache Health Check', async (updateProgress) => {
+        updateProgress(0, 'Loading cache...');
+        const masterIndex = this.cacheService.getMasterIndex();
+        if (!masterIndex) {
+          new Notice('❌ 无法加载缓存');
+          return;
+        }
+
+        const issues: string[] = [];
+        const vaultFiles = this.app.vault.getMarkdownFiles();
+        const vaultPaths = new Set(vaultFiles.map(f => f.path));
+
+        // 检查 1: 孤立笔记
+        updateProgress(20, 'Checking orphaned notes...');
+        let orphanedCount = 0;
+        for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+          if (!vaultPaths.has(meta.file_path)) {
+            orphanedCount++;
+          }
+        }
+        if (orphanedCount > 0) {
+          issues.push(`🔸 ${orphanedCount} 个孤立笔记（文件已删除但缓存仍存在）`);
+        }
+
+        // 检查 2: 缺少 note_id 的笔记
+        updateProgress(40, 'Checking notes without UUID...');
+        let missingUuidCount = 0;
+        for (const file of vaultFiles) {
+          try {
+            const content = await this.app.vault.read(file);
+            const fm = parseFrontMatter(content);
+            if (!fm.data.note_id) {
+              missingUuidCount++;
+            }
+          } catch (error) {
+            // 忽略读取错误
+          }
+        }
+        if (missingUuidCount > 0) {
+          issues.push(`🔸 ${missingUuidCount} 个笔记缺少 note_id`);
+        }
+
+        // 检查 3: 缺少 HASH_BOUNDARY 的笔记
+        updateProgress(60, 'Checking notes without HASH_BOUNDARY...');
+        let missingBoundaryCount = 0;
+        for (const file of vaultFiles) {
+          try {
+            const content = await this.app.vault.read(file);
+            if (!content.includes('<!-- HASH_BOUNDARY -->')) {
+              missingBoundaryCount++;
+            }
+          } catch (error) {
+            // 忽略读取错误
+          }
+        }
+        if (missingBoundaryCount > 0) {
+          issues.push(`🔸 ${missingBoundaryCount} 个笔记缺少 HASH_BOUNDARY`);
+        }
+
+        // 检查 4: 断链
+        updateProgress(80, 'Checking broken links...');
+        let brokenLinksCount = 0;
+        if (masterIndex.link_ledger) {
+          const ledger = masterIndex.link_ledger as Record<NoteId, NoteId[]>;
+          const validNoteIds = new Set(Object.keys(masterIndex.notes));
+
+          for (const [sourceId, targets] of Object.entries(ledger)) {
+            if (!validNoteIds.has(sourceId)) {
+              brokenLinksCount += targets.length;
+            } else {
+              for (const targetId of targets) {
+                if (!validNoteIds.has(targetId)) {
+                  brokenLinksCount++;
+                }
+              }
+            }
+          }
+        }
+        if (brokenLinksCount > 0) {
+          issues.push(`🔸 ${brokenLinksCount} 个断链（指向不存在的笔记）`);
+        }
+
+        updateProgress(100, 'Done');
+
+        if (issues.length === 0) {
+          new Notice('✅ 缓存健康状况良好，未发现问题', 5000);
+        } else {
+          const report =
+            `⚠️ 发现 ${issues.length} 类问题:\n\n` +
+            issues.join('\n') +
+            `\n\n建议：使用"清理孤立数据"功能修复`;
+          new Notice(report, 15000);
+          console.log('[Main] 健康检查报告:\n' + issues.join('\n'));
+        }
+      });
+    } catch (error) {
+      const err = error as Error;
+      new Notice(`❌ 健康检查失败: ${err.message}`);
+      console.error('[Main] Cache health check failed:', error);
       throw error;
     }
   }

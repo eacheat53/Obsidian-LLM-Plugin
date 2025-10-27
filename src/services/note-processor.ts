@@ -89,11 +89,23 @@ export class NoteProcessorService {
   /**
    * 计算笔记的内容 hash
    * 使用主要内容（HASH_BOUNDARY 之前）的 SHA-256
+   * 修复问题4: 自动添加缺失的 HASH_BOUNDARY
    *
    * @param file - 要进行 hash 的笔记文件
    * @returns SHA-256 hash 字符串
    */
   async calculateContentHash(file: TFile): Promise<ContentHash> {
+    // 修复问题4: 检查是否缺少 HASH_BOUNDARY，自动添加
+    const content = await this.app.vault.read(file);
+    if (!content.includes('<!-- HASH_BOUNDARY -->')) {
+      if (this.settings.enable_debug_logging) {
+        console.log(`[Note Processor] 自动添加 HASH_BOUNDARY 到 ${file.path}`);
+      }
+      // 在文件末尾添加 HASH_BOUNDARY
+      const newContent = content.replace(/\n*$/, '') + '\n<!-- HASH_BOUNDARY -->\n';
+      await this.app.vault.modify(file, newContent);
+    }
+
     const mainContent = await this.extractMainContent(file);
     return await calculateContentHash(mainContent);
   }

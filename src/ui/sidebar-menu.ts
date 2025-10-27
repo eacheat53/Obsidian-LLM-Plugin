@@ -67,6 +67,51 @@ export class SidebarMenuService {
         })
     );
 
+    // 同步内容 Hash：将当前 hash 标记为已处理（不重新生成 embedding）
+    menu.addItem((item) =>
+      item
+        .setTitle(tr.sidebar.syncHash)
+        .setIcon('sync')
+        .onClick(async () => {
+          try {
+            await this.plugin.syncHashWorkflow(this.plugin.settings.default_scan_path);
+          } catch (error) {
+            console.error('[Sidebar Menu] Sync hash failed:', error);
+          }
+        })
+    );
+
+    // 添加分隔符
+    menu.addSeparator();
+
+    // 缓存健康检查：检测孤立数据、断链等问题
+    menu.addItem((item) =>
+      item
+        .setTitle('🔍 缓存健康检查')
+        .setIcon('shield-check')
+        .onClick(async () => {
+          try {
+            await this.plugin.cacheHealthCheckWorkflow();
+          } catch (error) {
+            console.error('[Sidebar Menu] Cache health check failed:', error);
+          }
+        })
+    );
+
+    // 清理孤立数据：删除孤立笔记、嵌入和断链
+    menu.addItem((item) =>
+      item
+        .setTitle('🧹 清理孤立数据')
+        .setIcon('trash-2')
+        .onClick(async () => {
+          try {
+            await this.plugin.cleanOrphanedDataWorkflow();
+          } catch (error) {
+            console.error('[Sidebar Menu] Clean orphaned data failed:', error);
+          }
+        })
+    );
+
 
     menu.showAtMouseEvent(evt);
   }

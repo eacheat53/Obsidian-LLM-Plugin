@@ -23,6 +23,7 @@ export interface Translation {
     batchTags: string;
     generateUuid: string;
     viewFailures: string;
+    syncHash: string;
   };
   settings: {
     language: { name: string; desc: string };
@@ -148,6 +149,7 @@ export const translations: Record<Language, Translation> = {
       batchTags: 'Batch Insert AI Tags',
       generateUuid: 'Generate Unique ID for Current Note',
       viewFailures: 'View Failed Operations',
+      syncHash: 'Sync Content Hash (No Re-embedding)',
     },
     settings: {
       language: {
@@ -370,6 +372,7 @@ export const translations: Record<Language, Translation> = {
       batchTags: '批量插入 AI 标签',
       generateUuid: '为当前笔记生成唯一 ID',
       viewFailures: '查看失败的操作',
+      syncHash: '同步内容 Hash（不重新生成 Embedding）',
     },
     settings: {
       language: {
