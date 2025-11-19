@@ -20,6 +20,7 @@
   "author": "eacheat53",
   "license": "MIT",
   "devDependencies": {
+    "@types/sql.js": "^1.4.8",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
@@ -32,6 +33,7 @@
     "typescript": "^5.2.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "sql.js": "^1.11.8"
   }
 }

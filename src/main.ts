@@ -50,7 +50,7 @@ export default class ObsidianLLMPlugin extends Plugin {
     await this.loadSettings();
 
     // 初始化服务
-    this.initializeServices();
+    await this.initializeServices();
 
     // 注册设置选项卡
     this.addSettingTab(new SettingsTab(this.app, this));
@@ -69,31 +69,51 @@ export default class ObsidianLLMPlugin extends Plugin {
    */
   onunload() {
     console.log('Unloading Obsidian LLM Plugin');
+
+    // 关闭数据库连接
+    if (this.cacheService) {
+      this.cacheService.close();
+    }
+    if (this.failureLogService) {
+      this.failureLogService.close();
+    }
   }
 
   /**
    * 初始化所有服务
    */
-  private initializeServices(): void {
+  private async initializeServices(): Promise<void> {
     const basePath = (this.app.vault.adapter as any).basePath || '';
 
-    this.cacheService = new CacheService(this.app, basePath);
-    this.noteProcessorService = new NoteProcessorService(this.app, this.settings);
-    this.apiService = new APIService(this.settings);
-    this.failureLogService = new FailureLogService(this.app);
-    this.errorLogger = new ErrorLogger(basePath);
-    this.aiLogicService = new AILogicService(
-      this.app,
-      this.settings,
-      this.apiService,
-      this.cacheService,
-      this.failureLogService,
-      this.errorLogger
+    try {
+      // Initialize CacheService first with async database loading
+      this.cacheService = new CacheService(this.app, basePath);
+      await this.cacheService.initializeDatabase();
+
+      this.noteProcessorService = new NoteProcessorService(this.app, this.settings);
+      this.apiService = new APIService(this.settings);
+      this.failureLogService = new FailureLogService(this.app, this.cacheService);
+      this.errorLogger = new ErrorLogger(basePath);
+      this.aiLogicService = new AILogicService(
+        this.app,
+        this.settings,
+        this.apiService,
+        this.cacheService,
+        this.failureLogService,
+        this.errorLogger
     );
     this.linkInjectorService = new LinkInjectorService(this.app, this.settings, this.cacheService);
     this.taskManagerService = new TaskManagerService();
     this.sidebarMenuService = new SidebarMenuService(this);
     this.notifier = new NotifierService(this.settings.language);
+
+    console.log('[Obsidian LLM Plugin] All services initialized successfully');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[Obsidian LLM Plugin] Failed to initialize services:', error);
+    new Notice(`插件初始化失败: ${errorMessage}`);
+    throw error;
+  }
   }
 
   /**
@@ -576,188 +596,6 @@ export default class ObsidianLLMPlugin extends Plugin {
     }
   }
 
-  /* 已移除：独立的评分工作流，改为一键流程内联 */
-  /*
-    try {
-      await this.taskManagerService.startTask('Score Note Relationships', async (updateProgress) => {
-        // 步骤 1：加载主索引
-        updateProgress(0, 'Loading cache...');
-        const loadResult = await this.cacheService.loadMasterIndex({
-          detect_orphans: true,
-          create_if_missing: true
-        });
-
-        if (!loadResult.success || !loadResult.index) {
-          throw new Error('Failed to load master index');
-        }
-
-        const masterIndex = loadResult.index;
-
-        // 步骤 2：扫描保险库中的笔记
-        updateProgress(5, 'Scanning vault...');
-        const files = await this.noteProcessorService.scanVault(targetPath);
-
-        if (files.length === 0) {
-          new Notice('No files found to process');
-          return;
-        }
-
-        // 步骤 3：确定哪些笔记需要重新评分
-        updateProgress(10, 'Identifying changed notes...');
-        const changedNoteIds = new Set<NoteId>();
-        const allNoteIds: NoteId[] = [];
-        const embeddings = new Map<string, number[]>();
-
-        for (const file of files) {
-          const noteId = await this.noteProcessorService.ensureNoteHasId(file);
-          allNoteIds.push(noteId);
-
-          const contentHash = await this.noteProcessorService.calculateContentHash(file);
-          const existingNote = masterIndex.notes[noteId];
-
-          // 检查笔记是否已更改（用于智能模式）
-          if (!forceMode && existingNote && existingNote.content_hash !== contentHash) {
-            changedNoteIds.add(noteId);
-            
-            if (this.settings.enable_debug_logging) {
-              console.log(`[Main] Note changed: ${file.basename}`);
-            }
-          }
-
-          // 加载嵌入
-          const embeddingResult = await this.cacheService.loadEmbedding(noteId);
-          if (embeddingResult.success && embeddingResult.embedding) {
-            embeddings.set(noteId, embeddingResult.embedding);
-          } else {
-            // 缺少嵌入，需要先生成
-            new Notice(`⚠️ Note ${file.basename} is missing embedding. Please run "Generate Embeddings" first.`);
-            console.warn(`[Main] Missing embedding for note: ${noteId}`);
-          }
-        }
-
-        if (embeddings.size === 0) {
-          new Notice('No embeddings found. Please run "Generate Embeddings" first.');
-          return;
-        }
-
-        // 步骤 4：对于已更改的笔记，首先重新生成嵌入（智能模式）
-        if (!forceMode && changedNoteIds.size > 0) {
-          updateProgress(15, 'Updating embeddings for changed notes...');
-
-          for (const file of files) {
-            const noteId = await this.noteProcessorService.ensureNoteHasId(file);
-            if (!changedNoteIds.has(noteId)) continue;
-
-            // 提取主要内容并调用 Jina API 重新生成嵌入
-            const mainContent = await this.noteProcessorService.extractMainContent(file);
-            const response = await this.apiService.callJinaAPI({
-              input: [mainContent],
-              model: this.settings.jina_model_name,
-              note_ids: [noteId],
-            });
-
-            if (response.data.length > 0) {
-              const embedding = response.data[0].embedding;
-
-              // 保存嵌入
-              await this.cacheService.saveEmbedding({
-                note_id: noteId,
-                embedding,
-                model_name: this.settings.jina_model_name,
-                created_at: Date.now(),
-                content_preview: mainContent.substring(0, 200),
-              });
-
-              // 更新用于相似性的内存中映射
-              embeddings.set(noteId, embedding);
-
-              // 更新主索引笔记元数据（content_hash 和 last_processed）
-              const contentHash = await this.noteProcessorService.calculateContentHash(file);
-              const content = await this.app.vault.read(file);
-              const existingNote = masterIndex.notes[noteId] || { note_id: noteId, file_path: file.path };
-              masterIndex.notes[noteId] = {
-                ...existingNote,
-                note_id: noteId,
-                file_path: file.path,
-                content_hash: contentHash,
-                last_processed: Date.now(),
-                has_frontmatter: content.startsWith('---'),
-                has_hash_boundary: content.includes('<!-- HASH_BOUNDARY -->'),
-                has_links_section: content.includes('<!-- LINKS_START -->'),
-              };
-
-              // 使此笔记的旧分数无效
-              this.invalidateScoresForNote(masterIndex, noteId);
-            }
-          }
-        }
-
-        // 步骤 5：计算相似性
-        updateProgress(20, 'Calculating similarities...');
-        let pairs: NotePairScore[];
-
-        if (forceMode) {
-          // 强制模式：计算所有配对
-          pairs = await this.aiLogicService.calculateSimilarities(embeddings);
-          pairs = this.dedupePairs(pairs);
-        } else {
-          // 智能模式：仅计算涉及已更改笔记的配对
-          if (changedNoteIds.size === 0) {
-            new Notice('No notes have changed. All scores are up to date.');
-            return;
-          }
-
-          pairs = await this.aiLogicService.calculateSimilaritiesForNotes(
-            embeddings,
-            changedNoteIds
-          );
-        }
-
-        if (pairs.length === 0) {
-          new Notice('No similar note pairs found above threshold');
-          return;
-        }
-
-        new Notice(`Found ${pairs.length} pairs to score (${forceMode ? 'all' : changedNoteIds.size + ' changed notes'})`);
-
-        // 步骤 5：使用 LLM 对配对进行评分
-        updateProgress(50, 'Scoring pairs with AI...');
-        const scoredPairs = await this.aiLogicService.scorePairs(pairs);
-        // 保留单次可读日志（过滤后），避免重复输出
-
-        // 步骤 6：按阈值筛选
-        updateProgress(80, 'Filtering pairs...');
-        const filteredPairs = this.aiLogicService.filterByThresholds(scoredPairs);
-        // 人类可读日志：使用文件名而非 note_id 展示（阈值过滤后）
-        this.logPairsReadable(masterIndex, filteredPairs, '过滤后评分响应');
-
-        // 步骤 7：将分数保存到缓存
-        updateProgress(90, 'Saving scores...');
-        
-        // 在智能模式下，仅更新我们刚刚计算的配对的分数
-        // 在强制模式下，替换所有分数
-        if (forceMode) {
-          masterIndex.scores = {};
-        }
-
-        for (const pair of filteredPairs) {
-          const pairKey = `${pair.note_id_1}:${pair.note_id_2}`;
-          masterIndex.scores[pairKey] = pair;
-        }
-
-        await this.cacheService.saveMasterIndex(masterIndex);
-        this.cacheService.setMasterIndex(masterIndex);
-
-        updateProgress(100, 'Done!');
-        new Notice(`✅ Scored ${filteredPairs.length} note pairs`);
-      });
-    } catch (error) {
-      const err = error as Error;
-      new Notice(`❌ Error: ${err.message}`);
-      console.error('[Main] Score notes workflow failed:', error);
-      throw error;
-    }
-  }
 
   /**
    * 用于使特定笔记的分数无效的辅助方法

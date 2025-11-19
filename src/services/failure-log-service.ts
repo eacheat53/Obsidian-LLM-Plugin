@@ -1,5 +1,5 @@
 /**
- * 失败操作日志管理服务
+ * 基于 SQLite 的失败操作日志管理服务
  * 用于记录、查询和重试失败的批次操作
  */
 
@@ -8,24 +8,62 @@ import {
   FailureLog,
   FailedOperation,
   FailedOperationType,
+  FailureLogEntity,
 } from '../types/cache-types';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 
 /**
- * 失败日志服务
+ * 基于 SQLite 的失败日志服务
  */
 export class FailureLogService {
   private app: App;
   private pluginDir: string;
-  private logFile: string;
-  private cache: FailureLog | null = null;
+  private db: any = null;
+  private cacheService: any = null;
 
-  constructor(app: App) {
+  constructor(app: App, cacheService?: any) {
     this.app = app;
     // @ts-ignore - Obsidian 内部 API
-    this.pluginDir = path.join(this.app.vault.adapter.basePath, '.obsidian', 'plugins', 'obsidian-llm-plugin');
-    this.logFile = path.join(this.pluginDir, 'failure-log.json');
+    this.pluginDir = this.app.vault.adapter.basePath; // 传递给 CacheService 的基础路径
+    this.cacheService = cacheService;
+
+    // 如果没有提供 CacheService，初始化自己的数据库连接
+    if (!cacheService) {
+      this.initializeDatabase();
+    }
+  }
+
+  /**
+   * 初始化 SQLite 数据库连接（独立于 CacheService）
+   */
+  private initializeDatabase(): void {
+    try {
+      // 使用动态 require 加载 better-sqlite3
+      const Database = require('better-sqlite3');
+      this.db = new Database(`${this.pluginDir}/.obsidian/plugins/obsidian-llm-plugin/cache.sqlite`);
+
+      // 启用外键约束
+      this.db.exec('PRAGMA foreign_keys = ON');
+
+      // 确保失败日志表存在
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS failure_log (
+          id TEXT PRIMARY KEY,
+          timestamp INTEGER,
+          operation_type TEXT,
+          batch_info TEXT,
+          error_message TEXT,
+          resolved INTEGER DEFAULT 0
+        )
+      `);
+
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_failure_log_timestamp ON failure_log(timestamp)');
+
+      console.log('[Failure Log Service] SQLite database initialized successfully');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[Failure Log Service] Failed to initialize SQLite database:', error);
+      throw new Error(`Failed to initialize SQLite: ${errorMessage}`);
+    }
   }
 
   /**
@@ -38,57 +76,9 @@ export class FailureLogService {
   }
 
   /**
-   * 加载失败日志
+   * 记录失败操作
    */
-  private async loadLog(): Promise<FailureLog> {
-    if (this.cache) {
-      return this.cache;
-    }
-
-    try {
-      const content = await fs.readFile(this.logFile, 'utf-8');
-      const log = JSON.parse(content) as FailureLog;
-      this.cache = log;
-      return log;
-    } catch (error) {
-      // 如果文件不存在或解析失败，返回空日志
-      const emptyLog: FailureLog = {
-        version: '1.0.0',
-        created_at: Date.now(),
-        last_updated: Date.now(),
-        operations: [],
-      };
-      this.cache = emptyLog;
-      return emptyLog;
-    }
-  }
-
-  /**
-   * 保存失败日志到磁盘
-   * 使用原子写入（临时文件 + 重命名）
-   */
-  private async saveLog(log: FailureLog): Promise<void> {
-    log.last_updated = Date.now();
-
-    // 确保目录存在
-    await fs.mkdir(this.pluginDir, { recursive: true });
-
-    // 原子写入
-    const tempFile = `${this.logFile}.tmp`;
-    await fs.writeFile(tempFile, JSON.stringify(log, null, 2), 'utf-8');
-    await fs.rename(tempFile, this.logFile);
-
-    // 更新缓存
-    this.cache = log;
-  }
-
-  /**
-   * 记录一个失败的操作
-   *
-   * @param params - 失败操作参数
-   * @returns 失败操作 ID
-   */
-  async recordFailure(params: {
+  async logFailure(operation: {
     operation_type: FailedOperationType;
     batch_info: {
       batch_number: number;
@@ -102,253 +92,310 @@ export class FailureLogService {
       stack?: string;
       status?: number;
     };
+    retry_count?: number;
   }): Promise<string> {
-    const log = await this.loadLog();
+    const id = this.generateId();
+    const timestamp = Date.now();
 
-    const operation: FailedOperation = {
-      id: this.generateId(),
-      timestamp: Date.now(),
-      operation_type: params.operation_type,
-      batch_info: {
-        batch_number: params.batch_info.batch_number,
-        total_batches: params.batch_info.total_batches,
-        items: params.batch_info.items,
-        display_items: params.batch_info.display_items,
-      },
-      error: params.error,
-      retry_count: 0,
-      resolved: false,
+    const batchInfoJson = JSON.stringify({
+      batch_number: operation.batch_info.batch_number,
+      total_batches: operation.batch_info.total_batches,
+      items: operation.batch_info.items,
+      display_items: operation.batch_info.display_items || []
+    });
+
+    const errorJson = JSON.stringify({
+      message: operation.error.message,
+      type: operation.error.type,
+      stack: operation.error.stack || '',
+      status: operation.error.status || 0
+    });
+
+    const fullOperation: FailedOperation = {
+      id,
+      timestamp,
+      operation_type: operation.operation_type,
+      batch_info: operation.batch_info,
+      error: operation.error,
+      retry_count: operation.retry_count || 0,
+      resolved: false
     };
 
-    log.operations.push(operation);
-    await this.saveLog(log);
+    if (this.cacheService) {
+      // 使用 CacheService 的数据库连接
+      this.cacheService.logFailure({
+        id,
+        operation_type: operation.operation_type,
+        batch_info: batchInfoJson,
+        error_message: errorJson
+      });
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare(`
+        INSERT OR REPLACE INTO failure_log
+        (id, timestamp, operation_type, batch_info, error_message, resolved)
+        VALUES (?, ?, ?, ?, ?, 0)
+      `);
 
-    console.warn('[Failure Log] 记录失败操作:', operation.id, operation.operation_type);
-
-    return operation.id;
-  }
-
-  /**
-   * 获取所有未解决的失败操作
-   */
-  async getUnresolvedFailures(): Promise<FailedOperation[]> {
-    const log = await this.loadLog();
-    return log.operations.filter(op => !op.resolved);
-  }
-
-  /**
-   * 获取所有失败操作（包括已解决的）
-   */
-  async getAllFailures(): Promise<FailedOperation[]> {
-    const log = await this.loadLog();
-    return [...log.operations];
-  }
-
-  /**
-   * 根据 ID 获取失败操作
-   */
-  async getFailureById(id: string): Promise<FailedOperation | undefined> {
-    const log = await this.loadLog();
-    return log.operations.find(op => op.id === id);
-  }
-
-  /**
-   * 标记失败操作为已解决
-   */
-  async markAsResolved(id: string): Promise<boolean> {
-    const log = await this.loadLog();
-    const operation = log.operations.find(op => op.id === id);
-
-    if (!operation) {
-      return false;
+      stmt.run(id, timestamp, operation.operation_type, batchInfoJson, errorJson);
     }
 
-    operation.resolved = true;
-    await this.saveLog(log);
-
-    console.log('[Failure Log] 标记为已解决:', id);
-    return true;
+    return id;
   }
 
   /**
-   * 更新失败操作的重试信息
+   * 获取所有失败日志
    */
-  async updateRetryInfo(id: string): Promise<boolean> {
-    const log = await this.loadLog();
-    const operation = log.operations.find(op => op.id === id);
+  async getFailureLogs(limit: number = 100): Promise<FailureLog> {
+    let logs: FailureLogEntity[] = [];
 
-    if (!operation) {
-      return false;
+    if (this.cacheService) {
+      // 使用 CacheService 的数据库连接
+      logs = this.cacheService.getFailureLogs(limit);
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare('SELECT * FROM failure_log ORDER BY timestamp DESC LIMIT ?');
+      logs = stmt.all(limit) as any[];
     }
 
-    operation.retry_count++;
-    operation.last_retry_at = Date.now();
-    await this.saveLog(log);
-
-    return true;
-  }
-
-  /**
-   * 删除指定的失败操作
-   */
-  async deleteFailure(id: string): Promise<boolean> {
-    const log = await this.loadLog();
-    const index = log.operations.findIndex(op => op.id === id);
-
-    if (index === -1) {
-      return false;
-    }
-
-    log.operations.splice(index, 1);
-    await this.saveLog(log);
-
-    console.log('[Failure Log] 删除失败记录:', id);
-    return true;
-  }
-
-  /**
-   * 清理旧的失败操作记录
-   *
-   * @param daysOld - 保留最近多少天的记录
-   */
-  async clearOldFailures(daysOld: number = 30): Promise<number> {
-    const log = await this.loadLog();
-    const cutoffTime = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
-
-    const originalCount = log.operations.length;
-    log.operations = log.operations.filter(op =>
-      !op.resolved && op.timestamp > cutoffTime
-    );
-
-    const removedCount = originalCount - log.operations.length;
-
-    if (removedCount > 0) {
-      await this.saveLog(log);
-      console.log(`[Failure Log] 清理了 ${removedCount} 条旧记录`);
-    }
-
-    return removedCount;
-  }
-
-  /**
-   * 获取失败操作统计信息
-   */
-  async getStatistics(): Promise<{
-    total: number;
-    unresolved: number;
-    by_type: Record<FailedOperationType, number>;
-  }> {
-    const log = await this.loadLog();
-
-    const stats = {
-      total: log.operations.length,
-      unresolved: log.operations.filter(op => !op.resolved).length,
-      by_type: {
-        embedding: 0,
-        scoring: 0,
-        tagging: 0,
-      } as Record<FailedOperationType, number>,
-    };
-
-    for (const op of log.operations) {
-      if (!op.resolved) {
-        stats.by_type[op.operation_type]++;
-      }
-    }
-
-    return stats;
-  }
-
-  /**
-   * 清除所有失败记录（谨慎使用）
-   */
-  async clearAll(): Promise<void> {
-    const emptyLog: FailureLog = {
+    // 转换为旧的 FailureLog 格式
+    const failureLog: FailureLog = {
       version: '1.0.0',
       created_at: Date.now(),
       last_updated: Date.now(),
-      operations: [],
+      operations: logs.map(log => {
+        const batchInfo = JSON.parse(log.batch_info);
+        const error = JSON.parse(log.error_message);
+
+        return {
+          id: log.id,
+          timestamp: log.timestamp,
+          operation_type: log.operation_type as FailedOperationType,
+          batch_info: batchInfo,
+          error: error,
+          retry_count: 0, // 新结构中不存储此信息
+          resolved: log.resolved === 1
+        } as FailedOperation;
+      })
     };
 
-    await this.saveLog(emptyLog);
-    console.log('[Failure Log] 已清除所有失败记录');
+    return failureLog;
   }
 
   /**
-   * 获取所有失败操作中涉及的唯一笔记 ID 集合
-   * 用于智能重试：即使 hash 未改变，也重新处理这些笔记
-   *
-   * @param onlyUnresolved - 是否只返回未解决的失败操作中的笔记 ID
-   * @returns 涉及失败操作的笔记 ID 集合
+   * 根据操作类型获取失败日志
    */
-  async getFailedNoteIds(onlyUnresolved: boolean = true): Promise<Set<string>> {
-    const log = await this.loadLog();
-    const noteIds = new Set<string>();
+  async getFailuresByType(operationType: FailedOperationType, limit: number = 50): Promise<FailedOperation[]> {
+    let logs: FailureLogEntity[] = [];
 
-    const operations = onlyUnresolved
-      ? log.operations.filter(op => !op.resolved)
-      : log.operations;
-
-    for (const op of operations) {
-      // 从 items 中提取笔记 ID
-      for (const item of op.batch_info.items) {
-        if (op.operation_type === 'scoring') {
-          // 对于评分操作，item 格式为 "uuid1:uuid2"
-          const [noteId1, noteId2] = item.split(':');
-          if (noteId1) noteIds.add(noteId1);
-          if (noteId2) noteIds.add(noteId2);
-        } else {
-          // 对于嵌入和标签操作，item 就是 note_id
-          noteIds.add(item);
-        }
-      }
+    if (this.cacheService) {
+      // 使用 CacheService
+      const allLogs = this.cacheService.getFailureLogs(limit * 2); // 获取更多以便过滤
+      logs = allLogs.filter(log => log.operation_type === operationType).slice(0, limit);
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare(`
+        SELECT * FROM failure_log
+        WHERE operation_type = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `);
+      logs = stmt.all(operationType, limit) as any[];
     }
 
-    return noteIds;
+    return logs.map(log => {
+      const batchInfo = JSON.parse(log.batch_info);
+      const error = JSON.parse(log.error_message);
+
+      return {
+        id: log.id,
+        timestamp: log.timestamp,
+        operation_type: log.operation_type as FailedOperationType,
+        batch_info: batchInfo,
+        error: error,
+        retry_count: 0,
+        resolved: log.resolved === 1
+      } as FailedOperation;
+    });
   }
 
   /**
-   * 获取指定类型失败操作中涉及的唯一笔记 ID 集合
-   * 用于按类型重试失败操作
-   *
-   * @param operationType - 操作类型（embedding/scoring/tagging）
-   * @param onlyUnresolved - 是否只返回未解决的失败操作中的笔记 ID
-   * @returns 涉及指定类型失败操作的笔记 ID 集合
+   * 根据批次信息获取失败日志
    */
-  async getFailedNoteIdsByType(
-    operationType: FailedOperationType,
-    onlyUnresolved: boolean = true
-  ): Promise<Set<string>> {
-    const log = await this.loadLog();
-    const noteIds = new Set<string>();
+  async getFailuresByBatch(batchNumber: number): Promise<FailedOperation[]> {
+    let logs: FailureLogEntity[] = [];
 
-    const operations = (onlyUnresolved
-      ? log.operations.filter(op => !op.resolved)
-      : log.operations
-    ).filter(op => op.operation_type === operationType);
-
-    for (const op of operations) {
-      // 从 items 中提取笔记 ID
-      for (const item of op.batch_info.items) {
-        if (operationType === 'scoring') {
-          // 对于评分操作，item 格式为 "uuid1:uuid2"
-          const [noteId1, noteId2] = item.split(':');
-          if (noteId1) noteIds.add(noteId1);
-          if (noteId2) noteIds.add(noteId2);
-        } else {
-          // 对于嵌入和标签操作，item 就是 note_id
-          noteIds.add(item);
-        }
-      }
+    if (this.cacheService) {
+      // 使用 CacheService，获取所有日志并过滤
+      const allLogs = this.cacheService.getFailureLogs(1000);
+      logs = allLogs.filter(log => {
+        const batchInfo = JSON.parse(log.batch_info);
+        return batchInfo.batch_number === batchNumber;
+      });
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare(`
+        SELECT * FROM failure_log
+        WHERE JSON_EXTRACT(batch_info, '$.batch_number') = ?
+        ORDER BY timestamp DESC
+      `);
+      logs = stmt.all(batchNumber) as any[];
     }
 
-    return noteIds;
+    return logs.map(log => {
+      const batchInfo = JSON.parse(log.batch_info);
+      const error = JSON.parse(log.error_message);
+
+      return {
+        id: log.id,
+        timestamp: log.timestamp,
+        operation_type: log.operation_type as FailedOperationType,
+        batch_info: batchInfo,
+        error: error,
+        retry_count: 0,
+        resolved: log.resolved === 1
+      } as FailedOperation;
+    });
   }
 
   /**
-   * 使缓存失效，强制重新加载
+   * 标记失败为已解决
    */
-  invalidateCache(): void {
-    this.cache = null;
+  async resolveFailure(id: string): Promise<void> {
+    if (this.cacheService) {
+      // 使用 CacheService
+      this.cacheService.resolveFailure(id);
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare('UPDATE failure_log SET resolved = 1 WHERE id = ?');
+      stmt.run(id);
+    }
+  }
+
+  /**
+   * 批量标记失败为已解决
+   */
+  async resolveFailures(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+
+    if (this.cacheService) {
+      // 使用 CacheService
+      ids.forEach(id => this.cacheService.resolveFailure(id));
+    } else {
+      // 使用自己的数据库连接
+      const placeholders = ids.map(() => '?').join(',');
+      const stmt = this.db!.prepare(`UPDATE failure_log SET resolved = 1 WHERE id IN (${placeholders})`);
+      stmt.run(...ids);
+    }
+  }
+
+  /**
+   * 获取未解决的失败数量
+   */
+  async getUnresolvedCount(): Promise<number> {
+    let count = 0;
+
+    if (this.cacheService) {
+      // 使用 CacheService
+      const stats = this.cacheService.getStats();
+      count = stats.unresolved_failures;
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare('SELECT COUNT(*) as count FROM failure_log WHERE resolved = 0');
+      const result = stmt.get() as { count: number };
+      count = result.count;
+    }
+
+    return count;
+  }
+
+  /**
+   * 清理旧的失败日志
+   */
+  async cleanupOldLogs(daysToKeep: number = 30): Promise<number> {
+    const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+    let deletedCount = 0;
+
+    if (this.cacheService) {
+      // CacheService 暂不支持清理，手动实现
+      console.log('[Failure Log Service] Cleanup not implemented for CacheService mode');
+      return 0;
+    } else {
+      // 使用自己的数据库连接
+      const stmt = this.db!.prepare('DELETE FROM failure_log WHERE timestamp < ? AND resolved = 1');
+      const result = stmt.run(cutoffTime);
+      deletedCount = result.changes;
+    }
+
+    console.log(`[Failure Log Service] Cleaned up ${deletedCount} old failure logs`);
+    return deletedCount;
+  }
+
+  /**
+   * 关闭数据库连接
+   */
+  close(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+      console.log('[Failure Log Service] Database connection closed');
+    }
+  }
+
+  // ===== 兼容性方法（为了逐步迁移） =====
+
+  /**
+   * 兼容性方法：记录失败操作
+   * @deprecated 使用 logFailure()
+   */
+  async recordFailure(operation: {
+    operation_type: FailedOperationType;
+    batch_info: {
+      batch_number: number;
+      total_batches: number;
+      items: string[];
+      display_items?: string[];
+    };
+    error: {
+      message: string;
+      type: string;
+      stack?: string;
+      status?: number;
+    };
+    retry_count?: number;
+  }): Promise<void> {
+    await this.logFailure(operation);
+  }
+
+  /**
+   * 兼容性方法：获取未解决的失败
+   * @deprecated 使用 getUnresolvedCount()
+   */
+  async getUnresolvedFailures(): Promise<FailedOperation[]> {
+    const logs = await this.getFailureLogs(1000);
+    return logs.operations.filter(op => !op.resolved);
+  }
+
+  /**
+   * 兼容性方法：删除失败记录
+   * @deprecated 使用 resolveFailure()
+   */
+  async deleteFailure(id: string): Promise<void> {
+    await this.resolveFailure(id);
+  }
+
+  /**
+   * 兼容性方法：根据类型获取失败的笔记ID
+   * @deprecated 使用 getFailuresByType()
+   */
+  async getFailedNoteIdsByType(operationType: FailedOperationType): Promise<Set<string>> {
+    const failures = await this.getFailuresByType(operationType);
+    const noteIds = new Set<string>();
+
+    failures.forEach(failure => {
+      failure.batch_info.items.forEach(item => noteIds.add(item));
+    });
+
+    return noteIds;
   }
 }

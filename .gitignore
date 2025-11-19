@@ -34,6 +34,9 @@ pnpm-lock.yaml
 .cache/
 .temp/
 
+# SQLite database files (plugin runtime data)
+cache.sqlite
+
 # Test coverage
 coverage/
 draft.md

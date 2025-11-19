@@ -335,7 +335,7 @@ export class AILogicService {
           }
         }
 
-        // 合并 AI 分数到配对结果中，并立即保存到 masterIndex
+        // 合并 AI 分数到配对结果中，并立即保存到 SQLite
         for (let j = 0; j < batch.length; j++) {
           const pair = batch[j];
           const scoreResult = response.scores[j];
@@ -348,12 +348,11 @@ export class AILogicService {
 
           scoredPairs.push(scoredPair);
 
-          // ✅ 立即保存到 masterIndex.scores
-          const pairKey = `${scoredPair.note_id_1}:${scoredPair.note_id_2}`;
-          masterIndex.scores[pairKey] = scoredPair;
+          // ✅ 直接保存到 SQLite 数据库
+          this.cacheService.saveScore(scoredPair);
         }
 
-        // ✅ 立即持久化到磁盘（增量保存）
+        // ✅ 兼容性：更新 masterIndex 缓存（不实际保存）
         await this.cacheService.saveMasterIndex(masterIndex);
         this.cacheService.setMasterIndex(masterIndex);
 
@@ -382,6 +381,9 @@ export class AILogicService {
         if (this.settings.enable_debug_logging) {
           console.log(`[AI Logic] Scored batch ${batchNumber}/${totalBatches} (saved to disk)`);
         }
+
+        // Save database after each batch for sql.js persistence
+        this.cacheService.saveDatabase();
 
       } catch (error) {
         failedBatchCount++;
