@@ -1,5 +1,7 @@
 # Obsidian LLM Plugin
 
+[English](README.md) | [中文](README_CN.md)
+
 A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI services to automatically analyze notes and insert intelligent link suggestions.
 ![3.png](.assets/3.png)
 
