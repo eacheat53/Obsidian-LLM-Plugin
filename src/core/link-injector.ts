@@ -1,12 +1,8 @@
-/**
- * 用于将建议链接插入笔记的链接注入器服务
- * 处理 WikiLink 格式化和安全文件写入
- */
-
-import { App, TFile } from 'obsidian';
-import { NoteId, NotePairScore } from '../types/index';
+import { App, TFile, Notice } from 'obsidian';
 import { PluginSettings } from '../plugin-settings';
-import { CacheService } from './cache-service';
+import { NoteId, NotePairScore } from '../types/index';
+import { CacheService } from '../storage/cache-service';
+import { LinkLedger } from '../types/index';
 
 /**
  * 用于将链接插入 markdown 文件的服务
@@ -205,17 +201,17 @@ export class LinkInjectorService {
     }
 
     // Sort by ai_score descending and take top N
-    unique.sort((a,b)=> b.ai_score - a.ai_score);
-    return unique.slice(0, this.settings.max_links_per_note).map(p=>p.note_id_2);
+    unique.sort((a, b) => b.ai_score - a.ai_score);
+    return unique.slice(0, this.settings.max_links_per_note).map(p => p.note_id_2);
   }
 
   /**
    * 使用“链接台账（ledger）+ 托管区块”进行增删对账式插链
    * 仅在 HASH_BOUNDARY 之后的托管区内进行增删，不影响用户手写内容
    */
-  async reconcileUsingLedger(file: TFile, sourceNoteId: NoteId, desiredTargetIds: NoteId[]): Promise<{added:number; removed:number;}> {
+  async reconcileUsingLedger(file: TFile, sourceNoteId: NoteId, desiredTargetIds: NoteId[]): Promise<{ added: number; removed: number; }> {
     const masterIndex = this.cacheService.getMasterIndex();
-    if (!masterIndex) return {added:0, removed:0};
+    if (!masterIndex) return { added: 0, removed: 0 };
     if (!masterIndex.link_ledger) masterIndex.link_ledger = {} as any;
 
     const ledger = masterIndex.link_ledger as Record<NoteId, NoteId[]>;
@@ -228,17 +224,11 @@ export class LinkInjectorService {
     const toRemove = currentTargets.filter(id => !setDesired.has(id));
     const toAdd = desiredTargets.filter(id => !setCurrent.has(id));
 
-    // 读取内容并定位 HASH_BOUNDARY；没有则追加到文末
-    let content = await this.app.vault.read(file);
-    const boundaryMarker = '<!-- HASH_BOUNDARY -->';
-    let boundaryIndex = content.indexOf(boundaryMarker);
-    if (boundaryIndex === -1) {
-      content = content.replace(/\n*$/, '') + `\n${boundaryMarker}`; // 仅生成 HASH_BOUNDARY
-      boundaryIndex = content.indexOf(boundaryMarker);
+    if (this.settings.enable_debug_logging) {
+      console.log(`[Link Injector] Reconciling ${file.path}: Current=[${currentTargets.length}], Desired=[${desiredTargets.length}], +${toAdd.length}, -${toRemove.length}`);
     }
 
-    const head = content.slice(0, boundaryIndex + boundaryMarker.length);
-
+    // 1. 预先准备数据 (异步操作放在 process 之外)
     // 将 desiredTargets 转为路径并去重
     const desiredPathSet = new Set<string>();
     for (const id of desiredTargets) {
@@ -260,13 +250,27 @@ export class LinkInjectorService {
         if (desiredOnly.length > 0 || currentOnly.length > 0) {
           console.log(`[Link Injector][Ledger] 链接校准 详情 ${file.path}\n  + ${desiredOnly.join(', ')}\n  - ${currentOnly.join(', ') || '-'}`);
         }
-      } catch {}
+      } catch { }
     }
 
     const linksBlock = desiredPaths.map(p => `- ${this.formatWikiLink(p)}`).join('\n');
-    const newContent = head + (linksBlock ? `\n${linksBlock}\n` : '\n');
+    const boundaryMarker = '<!-- HASH_BOUNDARY -->';
 
-    await this.app.vault.modify(file, newContent);
+    // 2. 原子更新文件内容
+    await this.app.vault.process(file, (content) => {
+      let boundaryIndex = content.indexOf(boundaryMarker);
+
+      // 如果没有边界，追加到末尾
+      if (boundaryIndex === -1) {
+        // 确保前文有换行
+        const prefix = content.endsWith('\n') ? '' : '\n';
+        return content + prefix + boundaryMarker + '\n' + linksBlock + '\n';
+      }
+
+      // 保留边界之前的内容
+      const head = content.slice(0, boundaryIndex + boundaryMarker.length);
+      return head + '\n' + linksBlock + '\n';
+    });
 
     // 更新 ledger
     ledger[sourceNoteId] = desiredTargets;
@@ -275,6 +279,6 @@ export class LinkInjectorService {
       console.log(`[Link Injector][Ledger] 链接校准 完成 ${file.path} +${toAdd.length} / -${toRemove.length}`);
     }
 
-    return {added: toAdd.length, removed: toRemove.length};
+    return { added: toAdd.length, removed: toRemove.length };
   }
 }

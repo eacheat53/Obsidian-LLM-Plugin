@@ -2,9 +2,6 @@
 node_modules/
 
 # Build output
-main.js
-main.js.map
-*.js.map
 dist/
 
 # Obsidian workspace
@@ -30,6 +27,7 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+
 # Cache directories
 .cache/
 .temp/
@@ -38,7 +36,7 @@ pnpm-lock.yaml
 coverage/
 draft.md
 
-# Clude Code
+# Claude Code
 .claude
 openspec/
 specs/

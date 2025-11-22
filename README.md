@@ -29,14 +29,14 @@ A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI se
 git clone https://github.com/eacheat53/Obsidian-LLM-Plugin.git
 cd obsidian-llm-plugin
 
-# Install dependencies
-npm install
+# Install dependencies (using pnpm)
+pnpm install
 
 # Build the plugin
-npm run build
+pnpm run build
 
-# Copy to your vault
-cp main.js manifest.json styles.css /path/to/your/vault/.obsidian/plugins/obsidian-llm-plugin/
+# Copy to your vault (files are in dist/ directory)
+cp dist/main.js dist/sql-wasm.wasm manifest.json styles.css /path/to/your/vault/.obsidian/plugins/obsidian-llm-plugin/
 ```
 
 ## Configuration

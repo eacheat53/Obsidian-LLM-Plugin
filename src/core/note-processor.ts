@@ -106,8 +106,23 @@ export class NoteProcessorService {
       await this.app.vault.modify(file, newContent);
     }
 
+    // 获取主要内容（去除 front-matter 和 HASH_BOUNDARY 之后的内容）
     const mainContent = await this.extractMainContent(file);
-    return await calculateContentHash(mainContent);
+
+    // 修复问题: 统一换行符为 LF，防止因操作系统或编辑器自动格式化（CRLF -> LF）导致 hash 变更
+    const normalizedMainContent = mainContent.replace(/\r\n/g, '\n');
+
+    // 获取 front-matter 并移除 tags 字段，防止因标签更新导致 hash 变更
+    const fm = parseFrontMatter(content);
+    const fmData = { ...fm.data };
+    delete fmData.tags; // 忽略 tags 字段
+    delete fmData.tags_generated_at; // 也忽略生成时间
+
+    // 将处理后的 front-matter 与主要内容组合进行 hash
+    // 这样只有非 tags 的元数据变更或正文变更才会触发 hash 更新
+    const contentToHash = JSON.stringify(fmData) + normalizedMainContent;
+
+    return await calculateContentHash(contentToHash);
   }
 
   /**

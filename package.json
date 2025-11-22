@@ -1,12 +1,14 @@
 {
-  "name": "Obsidian LLM Plugin",
-  "version": "1.1.0",
+  "name": "obsidian-llm-plugin",
+  "version": "1.2.0",
   "description": "A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI services to automatically analyze notes and insert intelligent link suggestions",
-  "main": "main.js",
+  "main": "dist/main.js",
+  "packageManager": "pnpm@8.0.0",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "release": "pnpm run build && bash scripts/release.sh"
   },
   "keywords": [
     "obsidian",
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
+    "@types/sql.js": "^1.4.9",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "builtin-modules": "^3.3.0",
@@ -32,6 +35,7 @@
     "typescript": "^5.2.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "sql.js": "^1.13.0"
   }
 }

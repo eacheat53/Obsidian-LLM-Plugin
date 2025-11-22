@@ -64,3 +64,112 @@
 .jina-ai-linker-ribbon-icon {
   cursor: pointer;
 }
+
+/* ==========================================================================
+   Beautified Notifications (Notices)
+   ========================================================================== */
+
+.llm-notice-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.llm-notice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.llm-notice-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-notice-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  color: var(--text-normal);
+}
+
+.llm-notice-message {
+  font-size: 0.95em;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Notification Types */
+.llm-notice-container.type-info .llm-notice-icon {
+  color: var(--text-accent);
+}
+
+.llm-notice-container.type-success .llm-notice-icon {
+  color: var(--color-green);
+}
+
+.llm-notice-container.type-warning .llm-notice-icon {
+  color: var(--color-orange);
+}
+
+.llm-notice-container.type-error .llm-notice-icon {
+  color: var(--color-red);
+}
+
+/* Progress Bar in Notice */
+.llm-progress-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+}
+
+.llm-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.llm-progress-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.llm-progress-percent {
+  font-family: var(--font-monospace);
+  color: var(--text-accent);
+  font-weight: bold;
+}
+
+.llm-progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.llm-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+  width: 0%;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
+}
+
+.llm-progress-details {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}

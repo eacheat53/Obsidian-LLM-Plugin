@@ -28,6 +28,11 @@ export type SimilarityScore = number;
 export type AIScore = number;
 
 /**
+ * 链接台账：记录每个笔记由插件插入过的目标 note_id 列表
+ */
+export type LinkLedger = Record<NoteId, NoteId[]>;
+
+/**
  * 存储在缓存中的单个笔记的元数据
  */
 export interface NoteMetadata {

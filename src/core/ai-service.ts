@@ -7,9 +7,9 @@ import { App, TFile } from 'obsidian';
 import { PluginSettings } from '../plugin-settings';
 import { NoteId, NotePairScore, SimilarityScore } from '../types/index';
 import { NotePairForScoring, NoteForTagging } from '../types/api-types';
-import { APIService } from './api-service';
-import { CacheService } from './cache-service';
-import { FailureLogService } from './failure-log-service';
+import { APIService } from '../services/api-service';
+import { CacheService } from '../storage/cache-service';
+import { FailureLogService } from '../services/log-service';
 import { cosineSimilarity } from '../utils/vector-math';
 import { extractMainContent } from '../utils/frontmatter-parser';
 import { ErrorLogger } from '../utils/error-logger';
@@ -17,7 +17,7 @@ import { ErrorLogger } from '../utils/error-logger';
 /**
  * 面向笔记分析的 AI 能力服务
  */
-export class AILogicService {
+export class AIService {
   private app: App;
   private settings: PluginSettings;
   private apiService: APIService;
@@ -250,7 +250,7 @@ export class AILogicService {
           // 检查是否已经在待评分列表中
           const alreadyIncluded = pairsToScore.some(
             p => (p.note_id_1 === noteId1 && p.note_id_2 === noteId2) ||
-                 (p.note_id_1 === noteId2 && p.note_id_2 === noteId1)
+              (p.note_id_1 === noteId2 && p.note_id_2 === noteId1)
           );
 
           if (!alreadyIncluded) {
@@ -390,8 +390,8 @@ export class AILogicService {
 
         // 检查是否是连接关闭错误
         const isConnectionClosed = errorMessage.includes('ERR_CONNECTION_CLOSED') ||
-                                   errorMessage.includes('connection closed') ||
-                                   errorMessage.includes('socket hang up');
+          errorMessage.includes('connection closed') ||
+          errorMessage.includes('socket hang up');
 
         if (isConnectionClosed) {
           console.error(`[AI Logic] Batch ${batchNumber}/${totalBatches} 失败：连接被关闭`);
@@ -573,22 +573,22 @@ export class AILogicService {
           max_tags: 5,
         });
 
-        // 立即保存生成的标签到 masterIndex
+        // ✅ 立即保存生成的标签到 masterIndex 和数据库
         for (const result of response.results) {
           resultMap.set(result.note_id, result.tags);
 
-          // ✅ 立即更新 masterIndex（但不设置 tags_generated_at）
-          // tags_generated_at 只有在成功写入 front-matter 后才设置
           if (masterIndex.notes[result.note_id]) {
+            // 更新内存对象
             masterIndex.notes[result.note_id].tags = result.tags;
             // 注意：不在这里设置 tags_generated_at，因为还没写入文件
-            // tags_generated_at 将在 batchInsertTagsWorkflow 写入 front-matter 后设置
+
+            // 使用增量更新写入数据库
+            await this.cacheService.updateNote(result.note_id, masterIndex.notes[result.note_id]);
           }
         }
 
-        // ✅ 立即持久化到磁盘（增量保存）
-        await this.cacheService.saveMasterIndex(masterIndex);
-        this.cacheService.setMasterIndex(masterIndex);
+        // 不需要全量保存了
+        // await this.cacheService.saveMasterIndex(masterIndex);
 
         // ✅ 成功后删除失败集合中的相关记录
         if (this.failureLogService) {
@@ -631,8 +631,8 @@ export class AILogicService {
 
         // 检查是否是连接关闭错误
         const isConnectionClosed = errorMessage.includes('ERR_CONNECTION_CLOSED') ||
-                                   errorMessage.includes('connection closed') ||
-                                   errorMessage.includes('socket hang up');
+          errorMessage.includes('connection closed') ||
+          errorMessage.includes('socket hang up');
 
         if (isConnectionClosed) {
           console.error(`[AI Logic] Tag batch ${batchNumber}/${totalBatches} 失败：连接被关闭`);
