@@ -213,6 +213,20 @@ export default class ObsidianLLMPlugin extends Plugin {
   }
 
   /**
+   * 单独 AI 打标工作流
+   */
+  async runTaggingOnlyWorkflow(targetPath: string, forceMode: boolean = false): Promise<void> {
+    return this.workflowService.runTaggingOnlyWorkflow(targetPath, forceMode);
+  }
+
+  /**
+   * 单独 AI 打分工作流
+   */
+  async runScoringOnlyWorkflow(forceMode: boolean = false): Promise<void> {
+    return this.workflowService.runScoringOnlyWorkflow(forceMode);
+  }
+
+  /**
    * 重新校准链接工作流
    * 基于现有的 masterIndex.scores 和当前阈值设置，重新插入/删除链接
    * 不重新生成 embedding 或重新评分，适用于用户修改阈值后的快速校准

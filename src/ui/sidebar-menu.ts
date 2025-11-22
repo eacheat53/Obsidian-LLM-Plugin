@@ -53,6 +53,34 @@ export class SidebarMenuService {
         })
     );
 
+    // 单独 AI 打标
+    menu.addItem((item) =>
+      item
+        .setTitle('单独 AI 打标 (智能跳过)')
+        .setIcon('tag')
+        .onClick(async () => {
+          try {
+            await this.plugin.runTaggingOnlyWorkflow(this.plugin.settings.default_scan_path);
+          } catch (error) {
+            console.error('[Sidebar Menu] Tagging only failed:', error);
+          }
+        })
+    );
+
+    // 单独 AI 打分
+    menu.addItem((item) =>
+      item
+        .setTitle('单独 AI 打分 (智能跳过)')
+        .setIcon('star')
+        .onClick(async () => {
+          try {
+            await this.plugin.runScoringOnlyWorkflow();
+          } catch (error) {
+            console.error('[Sidebar Menu] Scoring only failed:', error);
+          }
+        })
+    );
+
     // 重新校准链接：基于当前阈值重新插入/删除链接（不重新评分）
     menu.addItem((item) =>
       item

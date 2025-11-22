@@ -141,6 +141,142 @@ export class WorkflowService {
     }
 
     /**
+     * 单独 AI 打标工作流 (Smart Skip)
+     * 流程：初始化 -> 准备文件 -> 智能检测变更 -> 更新标签
+     */
+    async runTaggingOnlyWorkflow(targetPath: string, forceMode: boolean = false): Promise<void> {
+        try {
+            await this.taskManagerService.startTask('Separate AI Tagging', async (updateProgress) => {
+                this.notifier.beginProgress('notices.starting', { mode: forceMode ? '强制打标' : '智能打标' });
+
+                // 1. 初始化
+                const masterIndex = await this.initializeWorkflow(updateProgress);
+
+                // 2. 准备文件
+                const files = await this.prepareFiles(targetPath, updateProgress);
+                if (files.length === 0) return;
+
+                // 3. 智能检测变更 (计算 Hash 并对比)
+                updateProgress(20, 'Checking for content changes...');
+                const changedNoteIds = new Set<NoteId>();
+
+                for (const file of files) {
+                    const noteId = await this.noteProcessorService.ensureNoteHasId(file);
+                    const contentHash = await this.noteProcessorService.calculateContentHash(file);
+                    const existingNote = masterIndex.notes[noteId];
+
+                    // 如果内容变了，或者强制模式，或者没有标签生成时间，都需要打标
+                    // 注意：updateTags 内部也会检查 tags_generated_at，但我们需要在这里更新 content_hash
+                    if (existingNote) {
+                        if (existingNote.content_hash !== contentHash) {
+                            existingNote.content_hash = contentHash;
+                            existingNote.last_processed = Date.now();
+                            changedNoteIds.add(noteId);
+                        }
+                    } else {
+                        // 新笔记，虽然没有 embedding 可能无法打标，但 updateTags 会处理
+                        changedNoteIds.add(noteId);
+                    }
+                }
+
+                // 保存 Hash 更新
+                if (changedNoteIds.size > 0) {
+                    await this.cacheService.saveMasterIndex(masterIndex);
+                }
+
+                // 4. 更新标签
+                // 传递 changedNoteIds 给 updateTags，它会结合 forceMode 和 tags_generated_at 决定是否打标
+                await this.updateTags(files, masterIndex, changedNoteIds, forceMode, updateProgress);
+
+                updateProgress(100, 'Done!');
+                this.notifier.endProgress();
+                this.notifier.success('notices.finished');
+            });
+        } catch (error) {
+            this.handleWorkflowError(error, 'Tagging only workflow failed');
+        }
+    }
+
+    /**
+     * 单独 AI 打分工作流 (Smart Skip)
+     * 流程：初始化 -> (不准备文件，直接用缓存) -> 计算相似度 -> 智能过滤 -> 打分
+     */
+    async runScoringOnlyWorkflow(forceMode: boolean = false): Promise<void> {
+        try {
+            await this.taskManagerService.startTask('Separate AI Scoring', async (updateProgress) => {
+                this.notifier.beginProgress('notices.starting', { mode: forceMode ? '强制打分' : '智能打分' });
+
+                // 1. 初始化
+                const masterIndex = await this.initializeWorkflow(updateProgress);
+
+                // 2. 加载所有 Embeddings
+                updateProgress(10, 'Loading embeddings...');
+                const embeddings = new Map<string, number[]>();
+                for (const [noteId, meta] of Object.entries(masterIndex.notes)) {
+                    const emb = await this.cacheService.loadEmbedding(noteId as NoteId);
+                    if (emb.success && emb.embedding) {
+                        embeddings.set(noteId, emb.embedding);
+                    }
+                }
+
+                if (embeddings.size === 0) {
+                    new Notice('No embeddings found. Please run the main workflow first.');
+                    return;
+                }
+
+                // 3. 计算所有可能的配对相似度
+                updateProgress(30, 'Calculating similarities...');
+                let pairs = await this.aiService.calculateSimilarities(embeddings);
+                pairs = this.dedupePairs(pairs);
+
+                if (pairs.length === 0) {
+                    new Notice('No pairs found above similarity threshold.');
+                    return;
+                }
+
+                // 4. 智能过滤 (Smart Skip)
+                updateProgress(50, 'Filtering pairs...');
+                const pairsToScore: NotePairScore[] = [];
+                let skippedCount = 0;
+
+                for (const pair of pairs) {
+                    if (this.aiService.shouldSkipPair(pair.note_id_1, pair.note_id_2, forceMode)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    pairsToScore.push(pair);
+                }
+
+                if (pairsToScore.length === 0) {
+                    new Notice(`All ${pairs.length} pairs skipped (recently scored). Use Force Mode to rescore.`);
+                    updateProgress(100, 'Done!');
+                    this.notifier.endProgress();
+                    return;
+                }
+
+                // 5. 执行打分
+                this.notifier.info('notices.scoringPairs', { count: pairsToScore.length });
+                updateProgress(60, `Scoring ${pairsToScore.length} pairs...`);
+
+                const scoredPairs = await this.aiService.scorePairs(pairsToScore, () => this.taskManagerService.isCancellationRequested());
+
+                // 6. 保存分数
+                for (const pair of scoredPairs) {
+                    const pairKey = `${pair.note_id_1}:${pair.note_id_2}`;
+                    masterIndex.scores[pairKey] = pair;
+                }
+                await this.cacheService.saveMasterIndex(masterIndex);
+
+                updateProgress(100, 'Done!');
+                this.notifier.endProgress();
+                new Notice(`✅ Scored ${scoredPairs.length} pairs (${skippedCount} skipped)`);
+            });
+        } catch (error) {
+            this.handleWorkflowError(error, 'Scoring only workflow failed');
+        }
+    }
+
+    /**
      * 重新校准链接工作流
      * 流程：初始化 -> 准备文件 -> 校准链接（基于现有分数）
      */
