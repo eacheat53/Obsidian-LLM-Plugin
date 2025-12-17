@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "description": "A powerful, highly configurable, pure TypeScript Obsidian plugin that uses AI services to automatically analyze notes and insert intelligent link suggestions",
   "main": "dist/main.js",
-  "packageManager": "pnpm@8.0.0",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",

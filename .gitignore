@@ -22,10 +22,9 @@ npm-debug.log*
 .env
 .env.local
 
-# Package manager
+# Package manager (keep pnpm-lock.yaml for reproducible builds)
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
 
 # Cache directories
