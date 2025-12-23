@@ -122,6 +122,7 @@ export interface Translation {
     gemini: string;
     openai: string;
     anthropic: string;
+    ollama: string;
     custom: string;
   };
   languages: {
@@ -347,6 +348,7 @@ export const translations: Record<Language, Translation> = {
       gemini: 'Google Gemini',
       openai: 'OpenAI',
       anthropic: 'Anthropic Claude',
+      ollama: 'Ollama (Local)',
       custom: 'Custom Provider',
     },
     languages: {
@@ -570,6 +572,7 @@ export const translations: Record<Language, Translation> = {
       gemini: 'Google Gemini',
       openai: 'OpenAI',
       anthropic: 'Anthropic Claude',
+      ollama: 'Ollama（本地）',
       custom: '自定义提供商',
     },
     languages: {

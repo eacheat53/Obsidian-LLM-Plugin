@@ -234,33 +234,23 @@ export class WorkflowService {
                     return;
                 }
 
-                // 4. 智能过滤 (Smart Skip)
-                updateProgress(50, 'Filtering pairs...');
-                const pairsToScore: NotePairScore[] = [];
-                let skippedCount = 0;
+                // 4. 执行打分 (Smart Skip 由 scorePairs 内部处理)
+                this.notifier.info('notices.scoringPairs', { count: pairs.length });
+                updateProgress(50, `Scoring ${pairs.length} pairs...`);
 
-                for (const pair of pairs) {
-                    if (this.aiService.shouldSkipPair(pair.note_id_1, pair.note_id_2, forceMode)) {
-                        skippedCount++;
-                        continue;
-                    }
-                    pairsToScore.push(pair);
-                }
+                const scoredPairs = await this.aiService.scorePairs(pairs, {
+                    shouldCancel: () => this.taskManagerService.isCancellationRequested(),
+                    forceMode
+                });
 
-                if (pairsToScore.length === 0) {
-                    new Notice(`All ${pairs.length} pairs skipped (recently scored). Use Force Mode to rescore.`);
+                if (scoredPairs.length === 0) {
+                    new Notice(`All ${pairs.length} pairs skipped (already scored). Use Force Mode to rescore.`);
                     updateProgress(100, 'Done!');
                     this.notifier.endProgress();
                     return;
                 }
 
-                // 5. 执行打分
-                this.notifier.info('notices.scoringPairs', { count: pairsToScore.length });
-                updateProgress(60, `Scoring ${pairsToScore.length} pairs...`);
-
-                const scoredPairs = await this.aiService.scorePairs(pairsToScore, () => this.taskManagerService.isCancellationRequested());
-
-                // 6. 保存分数
+                // 5. 保存分数
                 for (const pair of scoredPairs) {
                     const pairKey = `${pair.note_id_1}:${pair.note_id_2}`;
                     masterIndex.scores[pairKey] = pair;
@@ -269,7 +259,7 @@ export class WorkflowService {
 
                 updateProgress(100, 'Done!');
                 this.notifier.endProgress();
-                new Notice(`✅ Scored ${scoredPairs.length} pairs (${skippedCount} skipped)`);
+                new Notice(`✅ Scored ${scoredPairs.length} pairs (${pairs.length - scoredPairs.length} skipped)`);
             });
         } catch (error) {
             this.handleWorkflowError(error, 'Scoring only workflow failed');
@@ -450,7 +440,6 @@ export class WorkflowService {
                             has_links_section: content.includes('<!-- LINKS_START -->'),
                         };
 
-                        this.invalidateScoresForNote(masterIndex, noteId);
                         await this.cacheService.saveMasterIndex(masterIndex);
                         this.cacheService.setMasterIndex(masterIndex);
 
@@ -517,7 +506,7 @@ export class WorkflowService {
         if (pairs.length === 0) return [];
 
         this.notifier.info('notices.scoringPairs', { count: pairs.length });
-        const scoredPairs = await this.aiService.scorePairs(pairs);
+        const scoredPairs = await this.aiService.scorePairs(pairs, { changedNoteIds });
         const filteredPairs = this.aiService.filterByThresholds(scoredPairs);
         this.logPairsReadable(masterIndex, filteredPairs, '过滤后评分响应');
 
@@ -949,25 +938,8 @@ export class WorkflowService {
         }
     }
 
-    private invalidateScoresForNote(masterIndex: any, noteId: NoteId): void {
-        const keysToDelete: string[] = [];
-        for (const pairKey in masterIndex.scores) {
-            const [id1, id2] = pairKey.split(':');
-            if (id1 === noteId || id2 === noteId) {
-                keysToDelete.push(pairKey);
-            }
-        }
-
-        if (this.settings.enable_debug_logging && keysToDelete.length > 0) {
-            console.log(`[Workflow] Invalidating ${keysToDelete.length} scores for ${noteId}`);
-        }
-
-        for (const key of keysToDelete) {
-            delete masterIndex.scores[key];
-        }
-    }
-
     private logPairsReadable(masterIndex: any, pairs: NotePairScore[], title: string): void {
+
         if (!this.settings.enable_debug_logging) return;
         try {
             const seen = new Set<string>();

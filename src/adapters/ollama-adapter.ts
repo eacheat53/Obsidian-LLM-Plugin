@@ -9,22 +9,19 @@ import {
 } from '../types/api-types';
 
 /**
- * OpenAI 适配器 (GPT-4, GPT-3.5 等)
- * 也支持 OpenAI 兼容的 API（如 OpenRouter、本地 LLM）
+ * Ollama 适配器（本地 LLM）
+ * 使用 OpenAI 兼容 API 格式
+ * 默认端点: http://localhost:11434/v1
  */
-export class OpenAIAdapter extends BaseLLMAdapter {
+export class OllamaAdapter extends BaseLLMAdapter {
     constructor(settings: PluginSettings, apiService: APIService) {
-        super(settings, apiService, 'OpenAI Adapter');
+        super(settings, apiService, 'Ollama Adapter');
     }
 
     async scoreBatch(request: ScoringBatchRequest): Promise<ScoringBatchResponse> {
-        if (!this.settings.ai_api_key) {
-            throw new Error('OpenAI API 密钥未配置。请在插件设置中设置。');
-        }
-
         const prompt = this.buildScoringPrompt(request);
         const config = this.getScoringConfig();
-        const { url, headers, body } = this.buildOpenAIRequest(prompt, config);
+        const { url, headers, body } = this.buildOllamaRequest(prompt, config);
 
         if (this.settings.enable_debug_logging) {
             console.log(`[${this.adapterName}] 正在对 ${request.pairs.length} 个笔记配对进行评分`);
@@ -41,7 +38,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
         const responseText = data.choices?.[0]?.message?.content || '';
         if (!responseText) {
-            throw new Error(`来自 OpenAI 的空响应\n完整响应: ${JSON.stringify(data, null, 2)}`);
+            throw new Error(`来自 Ollama 的空响应\n完整响应: ${JSON.stringify(data, null, 2)}`);
         }
 
         const scores = this.parseScoringResponse(responseText, request.pairs);
@@ -49,18 +46,14 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         return {
             scores,
             model: this.settings.ai_model_name,
-            usage: this.extractOpenAIUsage(data),
+            usage: this.extractUsage(data),
         };
     }
 
     async generateTagsBatch(request: TaggingBatchRequest): Promise<TaggingBatchResponse> {
-        if (!this.settings.ai_api_key) {
-            throw new Error('OpenAI API 密钥未配置。请在插件设置中设置。');
-        }
-
         const prompt = this.buildTaggingPrompt(request);
         const config = this.getTaggingConfig();
-        const { url, headers, body } = this.buildOpenAIRequest(prompt, config);
+        const { url, headers, body } = this.buildOllamaRequest(prompt, config);
 
         if (this.settings.enable_debug_logging) {
             console.log(`[${this.adapterName}] 正在为 ${request.notes.length} 个笔记生成标签`);
@@ -77,7 +70,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
         const responseText = data.choices?.[0]?.message?.content || '';
         if (!responseText) {
-            throw new Error(`来自 OpenAI 的空响应\n完整响应: ${JSON.stringify(data, null, 2)}`);
+            throw new Error(`来自 Ollama 的空响应\n完整响应: ${JSON.stringify(data, null, 2)}`);
         }
 
         const results = this.parseTaggingResponse(responseText, request.notes);
@@ -85,27 +78,37 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         return {
             results,
             model: this.settings.ai_model_name,
-            usage: this.extractOpenAIUsage(data),
+            usage: this.extractUsage(data),
         };
     }
 
     // ============================================================================
-    // OpenAI 特定辅助方法
+    // Ollama 特定辅助方法
     // ============================================================================
 
-    private buildOpenAIRequest(prompt: string, config: { temperature: number; maxTokens: number }) {
+    private buildOllamaRequest(prompt: string, config: { temperature: number; maxTokens: number }) {
+        // Ollama 使用 OpenAI 兼容格式，但不需要 Bearer token
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+
+        // 如果配置了 API Key（某些代理服务需要），则添加
+        if (this.settings.ai_api_key) {
+            headers['Authorization'] = `Bearer ${this.settings.ai_api_key}`;
+        }
+
         return {
             url: `${this.settings.ai_api_url}/chat/completions`,
-            headers: {
-                'Authorization': `Bearer ${this.settings.ai_api_key}`,
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: {
                 model: this.settings.ai_model_name,
                 messages: [{ role: 'user', content: prompt }],
                 temperature: config.temperature,
-                max_tokens: config.maxTokens,
-                response_format: { type: 'json_object' },
+                // Ollama 使用 num_predict 而不是 max_tokens，但也支持 max_tokens
+                options: {
+                    num_predict: config.maxTokens,
+                },
+                stream: false,
             },
         };
     }
@@ -113,11 +116,11 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     private checkApiError(data: any): void {
         if (data.error) {
             console.error(`[${this.adapterName}] API 错误响应:`, JSON.stringify(data, null, 2));
-            throw new Error(`OpenAI API 错误: ${data.error.message || JSON.stringify(data.error)}`);
+            throw new Error(`Ollama API 错误: ${data.error.message || data.error}`);
         }
     }
 
-    private extractOpenAIUsage(data: any) {
+    private extractUsage(data: any) {
         return {
             total_tokens: data.usage?.total_tokens || 0,
             prompt_tokens: data.usage?.prompt_tokens || 0,

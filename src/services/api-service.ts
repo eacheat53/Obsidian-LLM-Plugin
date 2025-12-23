@@ -16,7 +16,9 @@ import {
 import { classifyAPIError, TransientError, getRetryDelay } from '../utils/error-classifier';
 import { LLMAdapter } from '../adapters/llm-adapter';
 import { GeminiAdapter } from '../adapters/gemini-adapter';
-import { OpenAIAdapter, AnthropicAdapter } from '../adapters/openai-adapter';
+import { OpenAIAdapter } from '../adapters/openai-adapter';
+import { AnthropicAdapter } from '../adapters/anthropic-adapter';
+import { OllamaAdapter } from '../adapters/ollama-adapter';
 
 /**
  * 用于进行外部 API 调用的服务
@@ -184,13 +186,46 @@ export class APIService {
         return new OpenAIAdapter(this.settings, this);
       case 'anthropic':
         return new AnthropicAdapter(this.settings, this);
+      case 'ollama':
+        return new OllamaAdapter(this.settings, this);
       case 'custom':
-        // 自定义提供商使用与 OpenAI 兼容的格式
-        return new OpenAIAdapter(this.settings, this);
+        // 自定义提供商：从 custom_providers 获取选中的配置
+        return this.createCustomAdapter();
       default:
         throw new Error(`不支持的 LLM 提供商: ${this.settings.ai_provider}`);
     }
   }
+
+  /**
+   * 创建自定义提供商适配器
+   * 根据 selected_custom_provider 查找配置
+   */
+  private createCustomAdapter(): LLMAdapter {
+    const selectedId = this.settings.selected_custom_provider;
+
+    if (!selectedId) {
+      // 没有选择自定义提供商，使用旧的 provider_configs.custom
+      return new OpenAIAdapter(this.settings, this);
+    }
+
+    const customProvider = this.settings.custom_providers.find(p => p.id === selectedId);
+
+    if (!customProvider) {
+      console.warn(`[API Service] 未找到自定义提供商: ${selectedId}，使用默认配置`);
+      return new OpenAIAdapter(this.settings, this);
+    }
+
+    // 创建临时设置对象，替换 API 配置
+    const customSettings = {
+      ...this.settings,
+      ai_api_url: customProvider.api_url,
+      ai_api_key: customProvider.api_key,
+      ai_model_name: customProvider.model_name,
+    };
+
+    return new OpenAIAdapter(customSettings, this);
+  }
+
 
   /**
    * 发出原始 HTTP POST 请求（供适配器使用）

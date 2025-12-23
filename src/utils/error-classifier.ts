@@ -183,3 +183,16 @@ export function canSkip(error: Error): boolean {
 export function getRetryDelay(attempt: number): number {
   return Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
 }
+
+/**
+ * 检查是否是连接关闭类错误
+ * 这些错误通常可以通过重试解决
+ *
+ * @param errorMessage - 错误消息
+ * @returns 如果是连接关闭类错误，则为 True
+ */
+export function isConnectionError(errorMessage: string): boolean {
+  return errorMessage.includes('ERR_CONNECTION_CLOSED') ||
+    errorMessage.includes('connection closed') ||
+    errorMessage.includes('socket hang up');
+}

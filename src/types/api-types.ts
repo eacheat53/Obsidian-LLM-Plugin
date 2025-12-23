@@ -7,7 +7,7 @@ import { NoteId, SimilarityScore, AIScore } from './index';
 /**
  * 支持的 LLM 提供商
  */
-export type LLMProvider = 'gemini' | 'openai' | 'anthropic' | 'custom';
+export type LLMProvider = 'gemini' | 'openai' | 'anthropic' | 'ollama' | 'custom';
 
 /**
  * 批量操作的生成模式

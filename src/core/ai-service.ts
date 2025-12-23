@@ -54,7 +54,6 @@ export class AIService {
     targetNoteIds: Set<NoteId>
   ): Promise<NotePairScore[]> {
     const pairs: NotePairScore[] = [];
-    const pairKeySet = new Set<string>();
     const noteIds = Array.from(embeddings.keys());
 
     if (this.settings.enable_debug_logging) {
@@ -115,47 +114,7 @@ export class AIService {
 
     if (this.settings.enable_debug_logging) {
       console.log(`[AI Logic] Calculating similarities for ${noteIds.length} notes`);
-
-      // 调试：检查所有向量是否异常一致
-      const firstEmbedding = embeddings.get(noteIds[0]);
-      let allIdentical = true;
-      let sampleDifferences = 0;
-
-      for (let i = 1; i < noteIds.length && allIdentical; i++) {
-        const emb = embeddings.get(noteIds[i]);
-        if (emb && firstEmbedding) {
-          for (let j = 0; j < Math.min(10, emb.length); j++) {
-            if (Math.abs(emb[j] - firstEmbedding[j]) > 0.0001) {
-              allIdentical = false;
-              sampleDifferences++;
-              break;
-            }
-          }
-        }
-      }
-
-      if (allIdentical) {
-        console.warn('[AI Logic] ⚠️ WARNING: All embeddings appear to be identical! Check Jina API response.');
-      } else {
-        console.log('[AI Logic] Embeddings are different (good)');
-      }
-
-      // 打印向量统计信息
-      if (firstEmbedding) {
-        console.log('[AI Logic] Embedding dimension:', firstEmbedding.length);
-        console.log('[AI Logic] Sample values:', firstEmbedding.slice(0, 5));
-      }
     }
-
-    // 调试：统计相似度分布
-    const similarityBuckets = new Map<string, number>([
-      ['0.0-0.5', 0],
-      ['0.5-0.6', 0],
-      ['0.6-0.7', 0],
-      ['0.7-0.8', 0],
-      ['0.8-0.9', 0],
-      ['0.9-1.0', 0],
-    ]);
 
     // 计算两两相似度
     for (let i = 0; i < noteIds.length; i++) {
@@ -167,16 +126,6 @@ export class AIService {
 
         // Calculate cosine similarity
         const similarity = cosineSimilarity(embedding1, embedding2);
-
-        // Update distribution buckets for debugging
-        if (this.settings.enable_debug_logging) {
-          if (similarity < 0.5) similarityBuckets.set('0.0-0.5', similarityBuckets.get('0.0-0.5')! + 1);
-          else if (similarity < 0.6) similarityBuckets.set('0.5-0.6', similarityBuckets.get('0.5-0.6')! + 1);
-          else if (similarity < 0.7) similarityBuckets.set('0.6-0.7', similarityBuckets.get('0.6-0.7')! + 1);
-          else if (similarity < 0.8) similarityBuckets.set('0.7-0.8', similarityBuckets.get('0.7-0.8')! + 1);
-          else if (similarity < 0.9) similarityBuckets.set('0.8-0.9', similarityBuckets.get('0.8-0.9')! + 1);
-          else similarityBuckets.set('0.9-1.0', similarityBuckets.get('0.9-1.0')! + 1);
-        }
 
         // 仅保留超过阈值的配对，且去重
         if (similarity >= this.settings.similarity_threshold) {
@@ -196,27 +145,36 @@ export class AIService {
     }
 
     if (this.settings.enable_debug_logging) {
-      console.log(`[AI Logic] Similarity distribution (out of ${noteIds.length * (noteIds.length - 1) / 2} total pairs):`);
-      console.log('  0.0-0.5:', similarityBuckets.get('0.0-0.5'));
-      console.log('  0.5-0.6:', similarityBuckets.get('0.5-0.6'));
-      console.log('  0.6-0.7:', similarityBuckets.get('0.6-0.7'));
-      console.log('  0.7-0.8:', similarityBuckets.get('0.7-0.8'));
-      console.log('  0.8-0.9:', similarityBuckets.get('0.8-0.9'));
-      console.log('  0.9-1.0:', similarityBuckets.get('0.9-1.0'));
       console.log(`[AI Logic] Found ${pairs.length} pairs above threshold ${this.settings.similarity_threshold}`);
     }
 
     return pairs;
   }
 
+
   /**
    * 使用 LLM 对配对进行相关性打分
    * 按批次调用 API 以提高效率
+   * 
+   * Smart Skip 逻辑：
+   * - 如果配对已有评分，且双方笔记都不在 changedNoteIds 中 → 跳过
+   * - 如果配对涉及 changedNoteIds 中的任一笔记 → 需要重新评分
+   * - forceMode = true → 全部评分
    *
    * @param pairs - 待打分的配对
+   * @param options - 可选参数：shouldCancel、changedNoteIds、forceMode
    * @returns 带有 AI 分数的配对结果
    */
-  async scorePairs(pairs: NotePairScore[], shouldCancel?: () => boolean): Promise<NotePairScore[]> {
+  async scorePairs(
+    pairs: NotePairScore[],
+    options: {
+      shouldCancel?: () => boolean;
+      changedNoteIds?: Set<NoteId>;
+      forceMode?: boolean;
+    } = {}
+  ): Promise<NotePairScore[]> {
+    const { shouldCancel, changedNoteIds, forceMode = false } = options;
+
     if (this.settings.enable_debug_logging) {
       console.log(`[AI Logic] Scoring ${pairs.length} pairs in batches of ${this.settings.batch_size_scoring}`);
     }
@@ -226,8 +184,42 @@ export class AIService {
       throw new Error('Master index not loaded');
     }
 
+    // ✅ Smart Skip：过滤不需要评分的配对
+    let pairsToScore: NotePairScore[] = [];
+    let skippedCount = 0;
+
+    for (const pair of pairs) {
+      const pairKey = this.createPairKey(pair.note_id_1, pair.note_id_2);
+      const existingScore = masterIndex.scores[pairKey];
+
+      // 判断是否需要评分
+      let needsScoring = forceMode;
+
+      if (!needsScoring) {
+        if (!existingScore) {
+          // 没有评分记录 → 需要评分
+          needsScoring = true;
+        } else if (changedNoteIds && changedNoteIds.size > 0) {
+          // 有评分记录，但涉及变化的笔记 → 需要重新评分
+          if (changedNoteIds.has(pair.note_id_1 as NoteId) || changedNoteIds.has(pair.note_id_2 as NoteId)) {
+            needsScoring = true;
+          }
+        }
+        // 否则：有评分且笔记都没变 → 跳过
+      }
+
+      if (needsScoring) {
+        pairsToScore.push(pair);
+      } else {
+        skippedCount++;
+      }
+    }
+
+    if (this.settings.enable_debug_logging && skippedCount > 0) {
+      console.log(`[AI Logic] Smart Skip: 跳过 ${skippedCount} 个已评分配对`);
+    }
+
     // ✅ 获取失败集合中的评分失败操作，强制重新评分
-    let pairsToScore = [...pairs];
     if (this.failureLogService) {
       const failedOps = await this.failureLogService.getUnresolvedFailures();
       const scoringFailures = failedOps.filter(op => op.operation_type === 'scoring');
@@ -278,6 +270,7 @@ export class AIService {
     if (pairsToScore.length === 0) {
       return [];
     }
+
 
     // 按批次处理
     const batchSize = this.settings.batch_size_scoring;
@@ -569,8 +562,8 @@ export class AIService {
         // 调用 LLM API 进行标签生成
         const response = await this.apiService.callLLMTaggingAPI({
           notes: notesForTagging,
-          min_tags: 3,
-          max_tags: 5,
+          min_tags: this.settings.min_tags,
+          max_tags: this.settings.max_tags,
         });
 
         // ✅ 立即保存生成的标签到 masterIndex 和数据库
@@ -738,8 +731,8 @@ export class AIService {
     // 调用 LLM API
     const response = await this.apiService.callLLMTaggingAPI({
       notes: [noteForTagging],
-      min_tags: 3,
-      max_tags: 5,  // Updated to match new prompt limit
+      min_tags: this.settings.min_tags,
+      max_tags: this.settings.max_tags,  // Updated to match new prompt limit
     });
 
     const tags = response.results[0]?.tags || [];
@@ -766,39 +759,7 @@ export class AIService {
   }
 
   /**
-   * 判断配对是否可跳过（智能模式）
-   * 通过缓存中已有分数的时效判断
-   *
-   * @param noteId1 - 笔记 1 的 ID
-   * @param noteId2 - 笔记 2 的 ID
-   * @param forceMode - 强制模式下不跳过
-   * @returns 是否跳过该配对
-   */
-  shouldSkipPair(noteId1: NoteId, noteId2: NoteId, forceMode: boolean): boolean {
-    if (forceMode) {
-      return false;
-    }
 
-    const masterIndex = this.cacheService.getMasterIndex();
-    if (!masterIndex) {
-      return false;
-    }
-
-    // 查询缓存中是否已有该配对
-    const pairKey = this.createPairKey(noteId1, noteId2);
-    const existingScore = masterIndex.scores[pairKey];
-
-    // 若评分较新则跳过
-    if (existingScore) {
-      const ageInDays = (Date.now() - existingScore.last_scored) / (1000 * 60 * 60 * 24);
-      // Skip if scored within last 7 days
-      return ageInDays < 7;
-    }
-
-    return false;
-  }
-
-  /**
    * 生成打分配对的复合键
    * 保证顺序一致（字典序较小的 ID 在前）
    *

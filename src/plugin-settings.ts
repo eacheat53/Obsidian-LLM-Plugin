@@ -19,6 +19,22 @@ export interface ProviderConfig {
 }
 
 /**
+ * 自定义提供商配置
+ */
+export interface CustomProviderConfig {
+  /** 唯一标识符 */
+  id: string;
+  /** 显示名称 */
+  name: string;
+  /** API 端点 URL */
+  api_url: string;
+  /** API 密钥 */
+  api_key: string;
+  /** 模型名称 */
+  model_name: string;
+}
+
+/**
  * 包含所有 23 个可配置参数的完整插件设置界面
  */
 export interface PluginSettings {
@@ -66,6 +82,12 @@ export interface PluginSettings {
 
   /** 特定于提供商的配置（按提供商保存） */
   provider_configs: Record<LLMProvider, ProviderConfig>;
+
+  /** 当前选择的自定义提供商 ID（当 ai_provider == 'custom' 时使用） */
+  selected_custom_provider: string;
+
+  /** 多个自定义提供商配置 */
+  custom_providers: CustomProviderConfig[];
 
   // ============================================================================
   // 处理参数
@@ -128,6 +150,12 @@ export interface PluginSettings {
 
   /** LLM 标签生成时发送的每个笔记内容的最大字符数 */
   llm_tagging_max_chars: number;
+
+  /** 每个笔记生成的最少标签数 */
+  min_tags: number;
+
+  /** 每个笔记生成的最大标签数 */
+  max_tags: number;
 
   // ============================================================================
   // 性能和调试
@@ -269,7 +297,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   ai_provider: 'gemini',
   ai_api_url: 'https://generativelanguage.googleapis.com/v1beta/models',
   ai_api_key: '',
-  ai_model_name: 'gemini-2.5-flash',  
+  ai_model_name: 'gemini-2.5-flash',
   llm_max_input_tokens: 100000,
 
   // 特定于提供商的配置
@@ -277,7 +305,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     gemini: {
       api_url: 'https://generativelanguage.googleapis.com/v1beta/models',
       api_key: '',
-      model_name: 'gemini-2.5-flash',  
+      model_name: 'gemini-2.5-flash',
     },
     openai: {
       api_url: 'https://api.openai.com/v1',
@@ -289,12 +317,21 @@ export const DEFAULT_SETTINGS: PluginSettings = {
       api_key: '',
       model_name: 'claude-3-5-sonnet-20241022',
     },
+    ollama: {
+      api_url: 'http://localhost:11434/v1',
+      api_key: '',
+      model_name: 'llama3.2',
+    },
     custom: {
       api_url: '',
       api_key: '',
       model_name: '',
     },
   },
+
+  // 多自定义提供商
+  selected_custom_provider: '',
+  custom_providers: [],
 
   // 处理参数
   default_scan_path: '/',
@@ -319,6 +356,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   batch_size_tagging: 5,
   llm_scoring_max_chars: 1000,
   llm_tagging_max_chars: 2000,
+  min_tags: 3,
+  max_tags: 5,
 
   // 性能和调试
   enable_debug_logging: false,

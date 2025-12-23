@@ -108,6 +108,153 @@ class ConfirmModal extends Modal {
 }
 
 /**
+ * 自定义提供商编辑模态框
+ */
+class CustomProviderModal extends Modal {
+  private language: 'en' | 'zh';
+  private existingProvider: import('../plugin-settings').CustomProviderConfig | null;
+  private onSave: (provider: import('../plugin-settings').CustomProviderConfig) => Promise<void>;
+
+  private nameInput: HTMLInputElement | null = null;
+  private urlInput: HTMLInputElement | null = null;
+  private keyInput: HTMLInputElement | null = null;
+  private modelInput: HTMLInputElement | null = null;
+
+  constructor(
+    app: App,
+    language: 'en' | 'zh',
+    existingProvider: import('../plugin-settings').CustomProviderConfig | null,
+    onSave: (provider: import('../plugin-settings').CustomProviderConfig) => Promise<void>
+  ) {
+    super(app);
+    this.language = language;
+    this.existingProvider = existingProvider;
+    this.onSave = onSave;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    const isEdit = !!this.existingProvider;
+    const title = this.language === 'zh'
+      ? (isEdit ? '编辑自定义提供商' : '添加自定义提供商')
+      : (isEdit ? 'Edit Custom Provider' : 'Add Custom Provider');
+
+    contentEl.createEl('h2', { text: title });
+
+    // 名称
+    const nameLabel = contentEl.createDiv({ cls: 'setting-item' });
+    nameLabel.createEl('div', {
+      text: this.language === 'zh' ? '名称' : 'Name',
+      cls: 'setting-item-name'
+    });
+    this.nameInput = nameLabel.createEl('input', {
+      type: 'text',
+      placeholder: this.language === 'zh' ? '如: 我的 OpenRouter' : 'e.g., My OpenRouter',
+      value: this.existingProvider?.name || ''
+    });
+    this.nameInput.style.width = '100%';
+    this.nameInput.style.marginTop = '5px';
+
+    // API URL
+    const urlLabel = contentEl.createDiv({ cls: 'setting-item', attr: { style: 'margin-top: 15px;' } });
+    urlLabel.createEl('div', {
+      text: 'API URL',
+      cls: 'setting-item-name'
+    });
+    urlLabel.createEl('div', {
+      text: this.language === 'zh' ? 'OpenAI 兼容的 API 端点' : 'OpenAI-compatible API endpoint',
+      cls: 'setting-item-description',
+      attr: { style: 'font-size: 0.85em; opacity: 0.7;' }
+    });
+    this.urlInput = urlLabel.createEl('input', {
+      type: 'text',
+      placeholder: 'https://api.example.com/v1',
+      value: this.existingProvider?.api_url || ''
+    });
+    this.urlInput.style.width = '100%';
+    this.urlInput.style.marginTop = '5px';
+
+    // API Key
+    const keyLabel = contentEl.createDiv({ cls: 'setting-item', attr: { style: 'margin-top: 15px;' } });
+    keyLabel.createEl('div', {
+      text: 'API Key',
+      cls: 'setting-item-name'
+    });
+    keyLabel.createEl('div', {
+      text: this.language === 'zh' ? '留空如果不需要' : 'Leave empty if not required',
+      cls: 'setting-item-description',
+      attr: { style: 'font-size: 0.85em; opacity: 0.7;' }
+    });
+    this.keyInput = keyLabel.createEl('input', {
+      type: 'password',
+      placeholder: 'sk-...',
+      value: this.existingProvider?.api_key || ''
+    });
+    this.keyInput.style.width = '100%';
+    this.keyInput.style.marginTop = '5px';
+
+    // Model Name
+    const modelLabel = contentEl.createDiv({ cls: 'setting-item', attr: { style: 'margin-top: 15px;' } });
+    modelLabel.createEl('div', {
+      text: this.language === 'zh' ? '模型名称' : 'Model Name',
+      cls: 'setting-item-name'
+    });
+    this.modelInput = modelLabel.createEl('input', {
+      type: 'text',
+      placeholder: 'gpt-4o-mini',
+      value: this.existingProvider?.model_name || ''
+    });
+    this.modelInput.style.width = '100%';
+    this.modelInput.style.marginTop = '5px';
+
+    // 按钮
+    const buttonContainer = contentEl.createDiv({ attr: { style: 'margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;' } });
+
+    const cancelBtn = buttonContainer.createEl('button', {
+      text: this.language === 'zh' ? '取消' : 'Cancel'
+    });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const saveBtn = buttonContainer.createEl('button', {
+      text: this.language === 'zh' ? '保存' : 'Save',
+      cls: 'mod-cta'
+    });
+    saveBtn.addEventListener('click', async () => {
+      const name = this.nameInput?.value.trim() || '';
+      const url = this.urlInput?.value.trim() || '';
+      const key = this.keyInput?.value || '';
+      const model = this.modelInput?.value.trim() || '';
+
+      if (!name || !url || !model) {
+        new Notice(this.language === 'zh'
+          ? '请填写名称、API URL 和模型名称'
+          : 'Please fill in Name, API URL, and Model Name');
+        return;
+      }
+
+      await this.onSave({
+        id: this.existingProvider?.id || '',
+        name,
+        api_url: url,
+        api_key: key,
+        model_name: model
+      });
+      this.close();
+    });
+
+    // 聚焦到名称输入框
+    this.nameInput?.focus();
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+/**
  * 设置选项卡类
  */
 export class SettingsTab extends PluginSettingTab {
@@ -313,87 +460,88 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(this.tr.settings.aiProvider.name)
       .setDesc(this.tr.settings.aiProvider.desc)
-      .addDropdown(dropdown => dropdown
-        .addOption('gemini', this.tr.providers.gemini)
-        .addOption('openai', this.tr.providers.openai)
-        .addOption('anthropic', this.tr.providers.anthropic)
-        .addOption('custom', this.tr.providers.custom)
-        .setValue(this.plugin.settings.ai_provider)
-        .onChange(async (value) => {
-          const newProvider = value as LLMProvider;
+      .addDropdown(dropdown => {
+        // 添加内置提供商
+        dropdown
+          .addOption('gemini', this.tr.providers.gemini)
+          .addOption('openai', this.tr.providers.openai)
+          .addOption('anthropic', this.tr.providers.anthropic)
+          .addOption('ollama', this.tr.providers.ollama);
+
+        // 添加自定义提供商选项
+        if (this.plugin.settings.custom_providers.length > 0) {
+          // 添加分隔线效果（使用特殊选项）
+          dropdown.addOption('custom', `── ${this.tr.providers.custom} ──`);
+          // 添加每个自定义提供商
+          this.plugin.settings.custom_providers.forEach(p => {
+            dropdown.addOption(`custom:${p.id}`, `  ${p.name}`);
+          });
+        } else {
+          dropdown.addOption('custom', this.tr.providers.custom);
+        }
+
+        // 设置当前值
+        let currentValue = this.plugin.settings.ai_provider;
+        if (currentValue === 'custom' && this.plugin.settings.selected_custom_provider) {
+          currentValue = `custom:${this.plugin.settings.selected_custom_provider}` as LLMProvider;
+        }
+        dropdown.setValue(currentValue);
+
+        dropdown.onChange(async (value) => {
+          // 解析选择的值
+          let newProvider: LLMProvider;
+          let customProviderId = '';
+
+          if (value.startsWith('custom:')) {
+            newProvider = 'custom';
+            customProviderId = value.replace('custom:', '');
+          } else {
+            newProvider = value as LLMProvider;
+          }
 
           // 保存当前提供商的配置
-          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider] = {
-            api_url: this.plugin.settings.ai_api_url,
-            api_key: this.plugin.settings.ai_api_key,
-            model_name: this.plugin.settings.ai_model_name,
-          };
+          if (this.plugin.settings.ai_provider !== 'custom') {
+            this.plugin.settings.provider_configs[this.plugin.settings.ai_provider] = {
+              api_url: this.plugin.settings.ai_api_url,
+              api_key: this.plugin.settings.ai_api_key,
+              model_name: this.plugin.settings.ai_model_name,
+            };
+          }
 
           // 切换提供商
           this.plugin.settings.ai_provider = newProvider;
+          this.plugin.settings.selected_custom_provider = customProviderId;
 
           // 加载新提供商的配置
-          const newConfig = this.plugin.settings.provider_configs[newProvider];
-          this.plugin.settings.ai_api_url = newConfig.api_url;
-          this.plugin.settings.ai_api_key = newConfig.api_key;
-          this.plugin.settings.ai_model_name = newConfig.model_name;
+          if (newProvider === 'custom' && customProviderId) {
+            const customProvider = this.plugin.settings.custom_providers.find(p => p.id === customProviderId);
+            if (customProvider) {
+              this.plugin.settings.ai_api_url = customProvider.api_url;
+              this.plugin.settings.ai_api_key = customProvider.api_key;
+              this.plugin.settings.ai_model_name = customProvider.model_name;
+            }
+          } else if (newProvider !== 'custom') {
+            const newConfig = this.plugin.settings.provider_configs[newProvider];
+            this.plugin.settings.ai_api_url = newConfig.api_url;
+            this.plugin.settings.ai_api_key = newConfig.api_key;
+            this.plugin.settings.ai_model_name = newConfig.model_name;
+          }
 
           await this.plugin.saveSettings();
           this.display(); // 刷新显示
-        })
-      );
-
-    // API URL
-    new Setting(containerEl)
-      .setName(this.tr.settings.aiApiUrl.name)
-      .setDesc(this.tr.settings.aiApiUrl.desc)
-      .addText(text => text
-        .setPlaceholder(this.tr.placeholders.aiApiUrl)
-        .setValue(this.plugin.settings.ai_api_url)
-        .onChange(async (value) => {
-          this.plugin.settings.ai_api_url = value;
-          // 同步到 provider_configs
-          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].api_url = value;
-          await this.plugin.saveSettings();
-        })
-      );
-
-    // API 密钥（密码字段）
-    new Setting(containerEl)
-      .setName(this.tr.settings.aiApiKey.name)
-      .setDesc(this.tr.settings.aiApiKey.desc)
-      .addText(text => text
-        .setPlaceholder(this.tr.placeholders.aiApiKey)
-        .setValue(this.plugin.settings.ai_api_key)
-        .onChange(async (value) => {
-          this.plugin.settings.ai_api_key = value;
-          // 同步到 provider_configs
-          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].api_key = value;
-          await this.plugin.saveSettings();
-        })
-      )
-      .then(setting => {
-        // 使其成为密码字段
-        const textInput = setting.controlEl.querySelector('input');
-        if (textInput) {
-          textInput.type = 'password';
-        }
+        });
       });
 
-    // 模型名称
-    new Setting(containerEl)
-      .setName(this.tr.settings.aiModelName.name)
-      .setDesc(this.tr.settings.aiModelName.desc)
-      .addText(text => text
-        .setPlaceholder(this.tr.placeholders.aiModelName)
-        .setValue(this.plugin.settings.ai_model_name)
-        .onChange(async (value) => {
-          this.plugin.settings.ai_model_name = value;
-          // 同步到 provider_configs
-          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].model_name = value;
-          await this.plugin.saveSettings();
-        })
-      );
+    // 当选择内置提供商时，显示配置字段
+    if (this.plugin.settings.ai_provider !== 'custom') {
+      this.renderProviderConfigFields(containerEl);
+    } else if (this.plugin.settings.selected_custom_provider) {
+      // 选择了自定义提供商，显示只读信息
+      this.renderSelectedCustomProviderInfo(containerEl);
+    }
+
+    // 自定义提供商管理区域
+    this.renderCustomProvidersManager(containerEl);
 
     // LLM 最大输入令牌数
     new Setting(containerEl)
@@ -418,6 +566,242 @@ export class SettingsTab extends PluginSettingTab {
         }
       });
   }
+
+  /**
+   * 渲染提供商配置字段（API URL、密钥、模型）
+   */
+  private renderProviderConfigFields(containerEl: HTMLElement): void {
+    // API URL
+    new Setting(containerEl)
+      .setName(this.tr.settings.aiApiUrl.name)
+      .setDesc(this.tr.settings.aiApiUrl.desc)
+      .addText(text => text
+        .setPlaceholder(this.tr.placeholders.aiApiUrl)
+        .setValue(this.plugin.settings.ai_api_url)
+        .onChange(async (value) => {
+          this.plugin.settings.ai_api_url = value;
+          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].api_url = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    // API 密钥（密码字段）
+    new Setting(containerEl)
+      .setName(this.tr.settings.aiApiKey.name)
+      .setDesc(this.tr.settings.aiApiKey.desc)
+      .addText(text => text
+        .setPlaceholder(this.tr.placeholders.aiApiKey)
+        .setValue(this.plugin.settings.ai_api_key)
+        .onChange(async (value) => {
+          this.plugin.settings.ai_api_key = value;
+          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].api_key = value;
+          await this.plugin.saveSettings();
+        })
+      )
+      .then(setting => {
+        const textInput = setting.controlEl.querySelector('input');
+        if (textInput) {
+          textInput.type = 'password';
+        }
+      });
+
+    // 模型名称
+    new Setting(containerEl)
+      .setName(this.tr.settings.aiModelName.name)
+      .setDesc(this.tr.settings.aiModelName.desc)
+      .addText(text => text
+        .setPlaceholder(this.tr.placeholders.aiModelName)
+        .setValue(this.plugin.settings.ai_model_name)
+        .onChange(async (value) => {
+          this.plugin.settings.ai_model_name = value;
+          this.plugin.settings.provider_configs[this.plugin.settings.ai_provider].model_name = value;
+          await this.plugin.saveSettings();
+        })
+      );
+  }
+
+  /**
+   * 渲染选中的自定义提供商信息
+   */
+  private renderSelectedCustomProviderInfo(containerEl: HTMLElement): void {
+    const provider = this.plugin.settings.custom_providers.find(
+      p => p.id === this.plugin.settings.selected_custom_provider
+    );
+    if (!provider) return;
+
+    const infoContainer = containerEl.createDiv({ cls: 'custom-provider-info' });
+    infoContainer.style.padding = '10px';
+    infoContainer.style.marginBottom = '10px';
+    infoContainer.style.backgroundColor = 'var(--background-secondary)';
+    infoContainer.style.borderRadius = '5px';
+
+    infoContainer.createEl('div', {
+      text: `📍 ${provider.name}`,
+      attr: { style: 'font-weight: bold; margin-bottom: 5px;' }
+    });
+    infoContainer.createEl('div', {
+      text: `URL: ${provider.api_url}`,
+      attr: { style: 'font-size: 0.9em; opacity: 0.8;' }
+    });
+    infoContainer.createEl('div', {
+      text: `Model: ${provider.model_name}`,
+      attr: { style: 'font-size: 0.9em; opacity: 0.8;' }
+    });
+  }
+
+  /**
+   * 渲染自定义提供商管理区域
+   */
+  private renderCustomProvidersManager(containerEl: HTMLElement): void {
+    // 可折叠区域
+    const detailsEl = containerEl.createEl('details', { cls: 'custom-providers-section' });
+    detailsEl.style.marginTop = '20px';
+    detailsEl.style.marginBottom = '20px';
+
+    const summaryEl = detailsEl.createEl('summary');
+    summaryEl.style.cursor = 'pointer';
+    summaryEl.style.fontWeight = 'bold';
+    summaryEl.style.padding = '10px';
+    summaryEl.style.backgroundColor = 'var(--background-secondary)';
+    summaryEl.style.borderRadius = '5px';
+    summaryEl.textContent = this.plugin.settings.language === 'zh'
+      ? `🔧 管理自定义提供商 (${this.plugin.settings.custom_providers.length})`
+      : `🔧 Manage Custom Providers (${this.plugin.settings.custom_providers.length})`;
+
+    const contentEl = detailsEl.createDiv({ cls: 'custom-providers-content' });
+    contentEl.style.padding = '15px';
+    contentEl.style.paddingTop = '10px';
+
+    // 现有的自定义提供商列表
+    if (this.plugin.settings.custom_providers.length > 0) {
+      this.plugin.settings.custom_providers.forEach((provider, index) => {
+        this.renderCustomProviderItem(contentEl, provider, index);
+      });
+    } else {
+      const emptyMsg = contentEl.createDiv();
+      emptyMsg.style.opacity = '0.6';
+      emptyMsg.style.fontStyle = 'italic';
+      emptyMsg.style.marginBottom = '10px';
+      emptyMsg.textContent = this.plugin.settings.language === 'zh'
+        ? '暂无自定义提供商'
+        : 'No custom providers yet';
+    }
+
+    // 添加新提供商按钮
+    new Setting(contentEl)
+      .setName(this.plugin.settings.language === 'zh' ? '添加自定义提供商' : 'Add Custom Provider')
+      .setDesc(this.plugin.settings.language === 'zh'
+        ? '添加一个 OpenAI 兼容的 API 端点'
+        : 'Add an OpenAI-compatible API endpoint')
+      .addButton(button => button
+        .setButtonText(this.plugin.settings.language === 'zh' ? '+ 添加' : '+ Add')
+        .setCta()
+        .onClick(() => {
+          this.showAddCustomProviderModal();
+        })
+      );
+  }
+
+  /**
+   * 渲染单个自定义提供商项
+   */
+  private renderCustomProviderItem(containerEl: HTMLElement, provider: import('../plugin-settings').CustomProviderConfig, index: number): void {
+    const itemEl = containerEl.createDiv({ cls: 'custom-provider-item' });
+    itemEl.style.display = 'flex';
+    itemEl.style.alignItems = 'center';
+    itemEl.style.padding = '8px 10px';
+    itemEl.style.marginBottom = '8px';
+    itemEl.style.backgroundColor = 'var(--background-primary)';
+    itemEl.style.borderRadius = '5px';
+    itemEl.style.border = '1px solid var(--background-modifier-border)';
+
+    // 提供商信息
+    const infoEl = itemEl.createDiv();
+    infoEl.style.flex = '1';
+    infoEl.createEl('div', { text: provider.name, attr: { style: 'font-weight: 500;' } });
+    infoEl.createEl('div', {
+      text: `${provider.model_name} @ ${new URL(provider.api_url).host}`,
+      attr: { style: 'font-size: 0.85em; opacity: 0.7;' }
+    });
+
+    // 按钮容器
+    const buttonsEl = itemEl.createDiv();
+    buttonsEl.style.display = 'flex';
+    buttonsEl.style.gap = '5px';
+
+    // 编辑按钮
+    const editBtn = buttonsEl.createEl('button', { text: '✏️' });
+    editBtn.style.padding = '4px 8px';
+    editBtn.addEventListener('click', () => {
+      this.showEditCustomProviderModal(provider);
+    });
+
+    // 删除按钮
+    const deleteBtn = buttonsEl.createEl('button', { text: '🗑️' });
+    deleteBtn.style.padding = '4px 8px';
+    deleteBtn.addEventListener('click', async () => {
+      this.plugin.settings.custom_providers.splice(index, 1);
+      // 如果删除的是当前选中的提供商，清除选择
+      if (this.plugin.settings.selected_custom_provider === provider.id) {
+        this.plugin.settings.selected_custom_provider = '';
+        if (this.plugin.settings.ai_provider === 'custom') {
+          this.plugin.settings.ai_provider = 'gemini';
+          const config = this.plugin.settings.provider_configs.gemini;
+          this.plugin.settings.ai_api_url = config.api_url;
+          this.plugin.settings.ai_api_key = config.api_key;
+          this.plugin.settings.ai_model_name = config.model_name;
+        }
+      }
+      await this.plugin.saveSettings();
+      this.display();
+    });
+  }
+
+  /**
+   * 显示添加自定义提供商模态框
+   */
+  private showAddCustomProviderModal(): void {
+    const modal = new CustomProviderModal(
+      this.app,
+      this.plugin.settings.language,
+      null,
+      async (provider) => {
+        provider.id = `custom-${Date.now()}`;
+        this.plugin.settings.custom_providers.push(provider);
+        await this.plugin.saveSettings();
+        this.display();
+      }
+    );
+    modal.open();
+  }
+
+  /**
+   * 显示编辑自定义提供商模态框
+   */
+  private showEditCustomProviderModal(provider: import('../plugin-settings').CustomProviderConfig): void {
+    const modal = new CustomProviderModal(
+      this.app,
+      this.plugin.settings.language,
+      provider,
+      async (updated) => {
+        const index = this.plugin.settings.custom_providers.findIndex(p => p.id === provider.id);
+        if (index !== -1) {
+          updated.id = provider.id; // 保持原 ID
+          this.plugin.settings.custom_providers[index] = updated;
+          // 如果是当前选中的提供商，更新当前配置
+          if (this.plugin.settings.selected_custom_provider === provider.id) {
+            this.plugin.settings.ai_api_url = updated.api_url;
+            this.plugin.settings.ai_api_key = updated.api_key;
+            this.plugin.settings.ai_model_name = updated.model_name;
+          }
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      }
+    );
+    modal.open();
+  }
+
 
   /**
    * 渲染处理参数部分
