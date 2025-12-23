@@ -1,0 +1,60 @@
+name: Release Obsidian Plugin
+
+on:
+  push:
+    tags:
+      - '*'  # 当推送任何 tag 时触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build plugin
+        run: pnpm build
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release zip
+        run: |
+          mkdir -p release
+          cp dist/main.js release/
+          cp dist/manifest.json release/
+          cp dist/styles.css release/ 2>/dev/null || true
+          cp dist/sql-wasm.wasm release/ 2>/dev/null || true
+          cd release && zip -r ../obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip
+            dist/main.js
+            dist/manifest.json
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
