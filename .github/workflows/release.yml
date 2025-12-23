@@ -37,22 +37,31 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Create release zip
+      - name: Create plugin install package (minimal)
         run: |
-          mkdir -p release
-          cp dist/main.js release/
-          cp dist/manifest.json release/
-          cp dist/styles.css release/ 2>/dev/null || true
-          cp dist/sql-wasm.wasm release/ 2>/dev/null || true
-          cd release && zip -r ../obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip .
+          mkdir -p plugin-package
+          cp dist/main.js plugin-package/
+          cp dist/manifest.json plugin-package/
+          cp dist/styles.css plugin-package/ 2>/dev/null || true
+          cp dist/sql-wasm.wasm plugin-package/ 2>/dev/null || true
+          cd plugin-package && zip -r ../obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip .
+
+      - name: Create full source package
+        run: |
+          zip -r obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}-full.zip \
+            src/ dist/ scripts/ \
+            package.json pnpm-lock.yaml \
+            tsconfig.json esbuild.config.mjs \
+            manifest.json versions.json \
+            README.md LICENSE \
+            -x "*.git*" -x "node_modules/*"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip
-            dist/main.js
-            dist/manifest.json
+            obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}-full.zip
           draft: false
           prerelease: false
           generate_release_notes: true
