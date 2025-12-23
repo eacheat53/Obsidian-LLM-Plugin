@@ -39,4 +39,4 @@ draft.md
 .claude
 openspec/
 specs/
-.specify
+.specifyscripts/release.sh
