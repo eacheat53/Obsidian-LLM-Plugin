@@ -41,7 +41,7 @@ jobs:
         run: |
           mkdir -p plugin-package
           cp dist/main.js plugin-package/
-          cp dist/manifest.json plugin-package/
+          cp manifest.json plugin-package/
           cp dist/styles.css plugin-package/ 2>/dev/null || true
           cp dist/sql-wasm.wasm plugin-package/ 2>/dev/null || true
           cd plugin-package && zip -r ../obsidian-llm-plugin-${{ steps.get_version.outputs.VERSION }}.zip .
